@@ -25,6 +25,15 @@ struct ProjectFile {
     pads: Vec<PadFile>,
     /// Only sequences that differ from the default.
     sequences: Vec<SeqFile>,
+    #[serde(default)]
+    song: SongFile,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct SongFile {
+    /// Sequence index and repeats.
+    steps: Vec<[u32; 2]>,
+    looping: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -172,6 +181,10 @@ fn describe(s: &Shared) -> ProjectFile {
         click: s.t.click,
         pads,
         sequences,
+        song: SongFile {
+            steps: s.song.steps.iter().map(|&(seq, reps)| [seq as u32, reps]).collect(),
+            looping: s.song.looping,
+        },
     }
 }
 
@@ -279,9 +292,21 @@ pub fn load(s: &mut Shared, root: &Path) -> Result<(), String> {
         }
     }
 
+    let song = crate::audio::Song {
+        steps: file
+            .song
+            .steps
+            .iter()
+            .filter(|[seq, _]| (*seq as usize) < SEQUENCES)
+            .map(|&[seq, reps]| (seq as usize, reps.clamp(1, 99)))
+            .collect(),
+        looping: file.song.looping,
+    };
+
     s.stop();
     s.pads = pads;
     s.seqs = seqs;
+    s.song = song;
     s.master = file.master.clamp(0.0, 1.0);
     s.t.timing = file.timing.min(TIMING.len() - 1);
     s.t.swing = file.swing.clamp(50, 75);
@@ -331,6 +356,8 @@ mod tests {
         s.seqs[4].tracks[2].insert(Note { tick: 200, pad: 1, velocity: 77, duration: 30 });
         s.seqs[4].tracks[5].on = false;
         s.t.swing = 62;
+        s.song.steps = vec![(4, 2), (0, 1)];
+        s.song.looping = true;
 
         let dir = std::env::temp_dir().join(format!("rsampler-project-{}", std::process::id()));
         let root = save(&s, &dir, "Beat").unwrap();
@@ -353,6 +380,7 @@ mod tests {
         assert_eq!(t.seqs[4].tracks[2].notes, s.seqs[4].tracks[2].notes);
         assert!(!t.seqs[4].tracks[5].on);
         assert_eq!(t.t.swing, 62);
+        assert_eq!(t.song, s.song);
     }
 
     #[test]

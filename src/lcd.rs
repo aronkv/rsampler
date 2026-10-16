@@ -42,6 +42,7 @@ pub enum Screen {
     Trim,
     Step,
     Sample,
+    Song,
 }
 
 impl Screen {
@@ -55,6 +56,7 @@ impl Screen {
             Screen::Mixer => ["", "", "", "", "", "RESET"],
             Screen::Trim => ["PLAY", "", "", "", "", "RESET"],
             Screen::Sample => ["", "", "", "", "", "REC"],
+            Screen::Song => ["INSERT", "DELETE", "", "", "", ""],
         }
     }
 
@@ -103,6 +105,9 @@ pub enum Field {
     SampleMode,
     Threshold,
     SampleTime,
+    SongLoop,
+    SongSeq,
+    SongReps,
 }
 
 pub struct Seg {
@@ -160,6 +165,8 @@ pub struct View<'a> {
     /// Selected note on the STEP EDIT screen.
     pub step: usize,
     pub sample: Option<SampleView>,
+    /// Selected step on the SONG screen.
+    pub song_step: usize,
 }
 
 /// What the SAMPLE screen shows.
@@ -177,6 +184,7 @@ pub struct SampleView {
 fn status(s: &Shared) -> &'static str {
     match (s.t.playing, s.t.rec) {
         (true, _) if s.t.tick < 0.0 => "COUNT IN",
+        (true, _) if s.t.song.is_some() => "SONG PLAY",
         (true, RecMode::Rec) => "REC",
         (true, RecMode::Overdub) => "OVERDUB",
         (true, RecMode::Off) => "PLAY",
@@ -292,6 +300,46 @@ pub fn rows(v: &View) -> Vec<Row> {
                 ),
                 row(vec![t(format!("To pad:{} {}", pad_name(v.pad), sound_name(v)))], vec![]),
             ];
+            msg(&mut rows);
+            rows
+        }
+        Screen::Song => {
+            let song = &s.song;
+            let playing = match s.t.song {
+                Some((step, rep)) => format!(
+                    "Step:{}/{} Rep:{}/{}",
+                    step + 1,
+                    song.steps.len(),
+                    rep + 1,
+                    song.steps[step.min(song.steps.len() - 1)].1
+                ),
+                None => format!("{} steps", song.steps.len()),
+            };
+            let mut rows =
+                vec![row(vec![t("SONG  Loop:"), f(Field::SongLoop, on_off(song.looping))], vec![t(playing)])];
+            let start = v.song_step.saturating_sub(1).min(song.steps.len().saturating_sub(4));
+            for (i, &(seq, reps)) in song.steps.iter().enumerate().skip(start).take(4) {
+                let used = if s.seqs[seq].tracks.iter().any(|t| !t.notes.is_empty()) { "" } else { " (Unused)" };
+                let current = if s.t.song.is_some_and(|(step, _)| step == i) { ">" } else { " " };
+                let left = if i == v.song_step {
+                    vec![
+                        t(format!("{current}{:02} ", i + 1)),
+                        f(Field::SongSeq, format!("Sq:{:02}", seq + 1)),
+                        t(format!("-Sequence{:02}{used}", seq + 1)),
+                    ]
+                } else {
+                    vec![t(format!("{current}{:02} Sq:{:02}-Sequence{:02}{used}", i + 1, seq + 1, seq + 1))]
+                };
+                let right = if i == v.song_step {
+                    vec![t("Reps:"), f(Field::SongReps, reps.to_string())]
+                } else {
+                    vec![t(format!("Reps:{reps}"))]
+                };
+                rows.push(row(left, right));
+            }
+            if song.steps.is_empty() {
+                rows.push(row(vec![t(" (empty: INSERT adds a step)")], vec![]));
+            }
             msg(&mut rows);
             rows
         }

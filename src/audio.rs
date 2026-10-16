@@ -52,11 +52,21 @@ pub struct Transport {
     /// Pads playing NOTE OFF notes from the sequence, and the tick to release them.
     note_offs: Vec<(u8, u32)>,
     pub undo: Option<(usize, Sequence)>,
+    /// Playing the song: the step, and how many times it has repeated so far.
+    pub song: Option<(usize, u32)>,
+}
+
+/// Song mode: sequences played in order, each repeated a number of times.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Song {
+    pub steps: Vec<(usize, u32)>,
+    pub looping: bool,
 }
 
 pub struct Shared {
     pub pads: Vec<Pad>,
     pub seqs: Vec<Sequence>,
+    pub song: Song,
     pub t: Transport,
     pub master: f32,
     /// Pad hits from the UI, consumed by the audio callback.
@@ -69,6 +79,7 @@ impl Shared {
         Self {
             pads: (0..PADS).map(|_| Pad::default()).collect(),
             seqs: (0..SEQUENCES).map(|_| Sequence::default()).collect(),
+            song: Song::default(),
             t: Transport {
                 seq: 0,
                 next_seq: None,
@@ -87,6 +98,7 @@ impl Shared {
                 pending: Vec::new(),
                 note_offs: Vec::new(),
                 undo: None,
+                song: None,
             },
             master: 0.8,
             hits: Vec::new(),
@@ -124,7 +136,24 @@ impl Shared {
         self.t.playing = true;
     }
 
+    /// Plays the song from `step`. Song mode does not record.
+    pub fn play_song(&mut self, step: usize) -> bool {
+        if self.t.playing || self.song.steps.is_empty() {
+            return false;
+        }
+        let step = step.min(self.song.steps.len() - 1);
+        self.t.song = Some((step, 0));
+        self.t.seq = self.song.steps[step].0;
+        self.t.rec = RecMode::Off;
+        self.t.next_seq = None;
+        self.t.tick = 0.0;
+        self.t.next_tick = 0;
+        self.t.playing = true;
+        true
+    }
+
     pub fn stop(&mut self) {
+        self.t.song = None;
         if !self.t.playing {
             // Pressing STOP while stopped returns to the start, like the hardware.
             self.locate(0);
@@ -279,7 +308,27 @@ impl Shared {
     fn end_of_sequence(&mut self) {
         let len = self.seq().len() as f64;
         self.commit_pending();
-        if let Some(next) = self.t.next_seq.take() {
+        if let Some((step, rep)) = self.t.song {
+            let (mut step, mut rep) = (step, rep + 1);
+            if rep >= self.song.steps.get(step).map_or(0, |s| s.1) {
+                (step, rep) = (step + 1, 0);
+            }
+            if step >= self.song.steps.len() && self.song.looping {
+                step = 0;
+            }
+            match self.song.steps.get(step) {
+                Some(&(seq, _)) => {
+                    self.t.song = Some((step, rep));
+                    self.t.seq = seq;
+                    self.t.tick -= len;
+                    self.t.next_tick = 0;
+                }
+                None => {
+                    self.stop();
+                    self.locate(0);
+                }
+            }
+        } else if let Some(next) = self.t.next_seq.take() {
             self.t.seq = next;
             self.t.tick -= len;
             self.t.next_tick = 0;
@@ -776,6 +825,27 @@ mod tests {
         s2.play(true);
         assert_eq!(run(&mut s2, &mut v2, 250 * 23), 0.0);
         assert!(run(&mut s2, &mut v2, 250 * 4) > 0.1);
+    }
+
+    #[test]
+    fn song_plays_steps_with_repeats_then_stops() {
+        let (mut s, mut v) = with_kit(48_000);
+        for seq in [3, 7] {
+            s.seqs[seq].set_bars(1);
+        }
+        s.song.steps = vec![(3, 2), (7, 1)];
+        assert!(s.play_song(0));
+        // A one-bar sequence at 120 BPM is 384 ticks of 250 frames.
+        let bar = 384 * 250;
+        run(&mut s, &mut v, bar - 10);
+        assert_eq!((s.t.seq, s.t.song), (3, Some((0, 0))));
+        run(&mut s, &mut v, bar);
+        assert_eq!((s.t.seq, s.t.song), (3, Some((0, 1))));
+        run(&mut s, &mut v, bar);
+        assert_eq!((s.t.seq, s.t.song), (7, Some((1, 0))));
+        run(&mut s, &mut v, bar);
+        assert!(!s.t.playing);
+        assert_eq!(s.t.song, None);
     }
 
     #[test]

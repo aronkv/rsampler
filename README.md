@@ -3,7 +3,7 @@
 A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.
 
 > **Status:** early development. Pads, programs, mixer, trimming, a 99-sequence, 64-track sequencer
-> step editing, sampling and saving projects work. Song mode and MIDI are still missing.
+> song mode, step editing, sampling and saving projects work. MIDI is still missing.
 
 ## Goals
 
@@ -105,6 +105,16 @@ passes. **TR.ON** (F3) and **TRACK MUTE** mute the track, **SOLO** (F4) plays on
 **LOCATE**: **STEP <** / **>** move by the `Timing` grid, **BAR <<** / **>>** by a bar, and
 **GO TO** returns to the start. **STOP** pressed while stopped also returns to the start.
 
+### SONG
+
+The blue **1 / SONG** key (`Ctrl+1`) chains sequences into a song. **INSERT** (F1) adds a step after
+the selected one, playing the sequence chosen on the MAIN screen; **DELETE** (F2) removes it.
+**↑** / **↓** choose a step, and its `Sq` and `Reps` (how many times it plays) are set with the
+DATA wheel. `Loop` starts the song over at the end.
+
+On this screen **PLAY START** plays the song from the first step and **PLAY** from the selected
+one; `>` marks the step that is playing. Song mode does not record.
+
 ### STEP EDIT
 
 **STEP** (F1 on the MAIN screen) lists the notes of the current track. **↑** / **↓** choose a note
@@ -202,12 +212,12 @@ replaces everything that is open.
 | `Page Up` / `Page Down`     | BAR << / >>                  |
 | `Home`                      | GO TO start                  |
 | `F1`–`F6`                   | Soft keys                    |
-| `Ctrl+3` / `4` / `5` / `6` / `8` | LOAD / SAMPLE / TRIM / PROGRAM / MIXER |
+| `Ctrl+1` / `3` / `4` / `5` / `6` / `8` | SONG / LOAD / SAMPLE / TRIM / PROGRAM / MIXER |
 | `Esc`                       | MAIN SCREEN                  |
 
 ### Not there yet
 
-Song mode, NOTE VARIATION, MIDI, and the remaining modes (SONG, MISC, SETUP, OTHER).
+NOTE VARIATION, MIDI, and the remaining modes (MISC, SETUP, OTHER).
 
 Closing the window with unsaved changes shows a warning on the LCD instead; close it again to quit
 without saving.

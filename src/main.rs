@@ -73,6 +73,8 @@ struct App {
     pad: usize,
     /// Selected note on the STEP EDIT screen.
     step: usize,
+    /// Selected step on the SONG screen.
+    song_step: usize,
     velocity: u8,
     message: String,
     message_at: Instant,
@@ -154,6 +156,7 @@ impl App {
             focus: 0,
             pad: 0,
             step: 0,
+            song_step: 0,
             velocity: 0,
             message: error.unwrap_or_default(),
             message_at: Instant::now(),
@@ -300,6 +303,7 @@ impl App {
             name: &self.save_name,
             editing: self.editing_name,
             step: self.step,
+            song_step: self.song_step,
             sample: self.input.as_ref().map(|input| {
                 let c = input.lock();
                 lcd::SampleView {
@@ -337,6 +341,11 @@ impl App {
             }
             // Level and Pan share one row; up selects Level, down selects Pan.
             Screen::Mixer => self.focus = (dy > 0) as usize,
+            Screen::Song if dy != 0 => {
+                let len = self.with(|s| s.song.steps.len());
+                self.song_step = (self.song_step as i32 + dy).clamp(0, len.saturating_sub(1) as i32) as usize;
+                self.focus = self.focus.max(1);
+            }
             // Up and down pick the note; left and right move between its fields.
             Screen::Step if dy != 0 => {
                 self.select_note(self.step as isize + dy as isize);
@@ -392,7 +401,20 @@ impl App {
         if field == Field::Track {
             self.step = 0;
         }
+        let song_step = self.song_step;
         match field {
+            Field::SongLoop => return self.with(|s| s.song.looping ^= true),
+            Field::SongSeq | Field::SongReps => {
+                return self.with(|s| {
+                    if let Some(step) = s.song.steps.get_mut(song_step) {
+                        if field == Field::SongSeq {
+                            step.0 = (step.0 as i32 + d).clamp(0, seq::SEQUENCES as i32 - 1) as usize;
+                        } else {
+                            step.1 = (step.1 as i32 + d).clamp(1, 99) as u32;
+                        }
+                    }
+                });
+            }
             Field::SampleMode => return self.sample_mono ^= true,
             Field::Threshold => return self.sample_threshold = (self.sample_threshold + d).clamp(-61, 0),
             Field::SampleTime => return self.sample_time = (self.sample_time as i32 + d).clamp(1, 60) as u32,
@@ -481,7 +503,10 @@ impl App {
                 | Field::NoteDur
                 | Field::SampleMode
                 | Field::Threshold
-                | Field::SampleTime => {}
+                | Field::SampleTime
+                | Field::SongLoop
+                | Field::SongSeq
+                | Field::SongReps => {}
             }
         });
     }
@@ -685,6 +710,27 @@ impl App {
                 self.say("Sound removed");
             }
             (Screen::Sample, 4 | 5) => self.sample_key(i),
+            (Screen::Song, 0) => {
+                // A new step after the selected one, playing the sequence of the MAIN screen.
+                let at = self.with(|s| {
+                    let at = (self.song_step + 1).min(s.song.steps.len());
+                    let seq = s.t.seq;
+                    s.song.steps.insert(at, (seq, 1));
+                    at
+                });
+                self.song_step = at;
+                self.focus = 1;
+            }
+            (Screen::Song, 1) => {
+                let sel = self.song_step;
+                let left = self.with(|s| {
+                    if s.t.song.is_none() && sel < s.song.steps.len() {
+                        s.song.steps.remove(sel);
+                    }
+                    s.song.steps.len()
+                });
+                self.song_step = sel.min(left.saturating_sub(1));
+            }
             (Screen::Mixer, 5) => self.with(|s| (s.pads[pad].level, s.pads[pad].pan) = (100, 0)),
             (Screen::Trim, 0) => self.with(|s| s.hits.push(Hit::Press { pad: pad as u8, velocity: 127 })),
             (Screen::Trim, 5) => self.with(|s| {
@@ -739,6 +785,19 @@ impl App {
         }
     }
 
+    /// PLAY / PLAY START. On the SONG screen they play the song, from the selected step or the
+    /// first one.
+    fn play(&mut self, from_start: bool) {
+        if matches!(self.screen, Screen::Song) {
+            let step = if from_start { 0 } else { self.song_step };
+            if !self.with(|s| s.play_song(step)) && !self.with(|s| s.t.playing) {
+                self.say("The song is empty: INSERT adds a step");
+            }
+        } else {
+            self.with(|s| s.play(from_start));
+        }
+    }
+
     /// T/C: quantizes the current track to the Timing setting.
     fn timing_correct(&mut self) {
         let msg = self.with(|s| {
@@ -766,6 +825,10 @@ impl App {
             "TRIM" => self.set_screen(Screen::Trim),
             "PROGRAM" => self.set_screen(Screen::Program),
             "MIXER" => self.set_screen(Screen::Mixer),
+            "SONG" => {
+                self.set_screen(Screen::Song);
+                self.focus = 1;
+            }
             "SAMPLE" => {
                 self.set_screen(Screen::Sample);
                 match sample::Input::open() {
@@ -819,8 +882,14 @@ impl App {
         match action {
             Action::Pad(n, true) => self.pad_press(n, KEY_VELOCITY),
             Action::Pad(n, false) => self.pad_release(n),
-            Action::PlayStop => self.with(|s| if s.t.playing { s.stop() } else { s.play(false) }),
-            Action::PlayStart => self.with(|s| s.play(true)),
+            Action::PlayStop => {
+                if self.with(|s| s.t.playing) {
+                    self.with(|s| s.stop());
+                } else {
+                    self.play(false);
+                }
+            }
+            Action::PlayStart => self.play(true),
             Action::Rec(mode) => self.with(|s| s.toggle_rec(mode)),
             Action::Undo => self.with(|s| s.undo()),
             Action::Cursor(dx, dy) => self.cursor(dx, dy),
@@ -870,6 +939,7 @@ impl App {
                 Key::O if modifiers.ctrl => Action::Rec(RecMode::Overdub),
                 Key::Z if modifiers.ctrl => Action::Undo,
                 Key::S if modifiers.ctrl => Action::Save,
+                Key::Num1 if command => Action::Mode("SONG"),
                 Key::Num3 if command => Action::Mode("LOAD"),
                 Key::Num4 if command => Action::Mode("SAMPLE"),
                 Key::Num5 if command => Action::Mode("TRIM"),
@@ -1256,13 +1326,13 @@ impl App {
                 led(painter, p, x + 6.0, 627.0, on, RED_ON, RED_OFF);
             }
             if key(ui, p, p.rect(x, 640.0, 42.0, 32.0), style, "", false).clicked() {
-                self.with(|s| match i {
-                    0 => s.toggle_rec(RecMode::Rec),
-                    1 => s.toggle_rec(RecMode::Overdub),
-                    2 => s.stop(),
-                    3 => s.play(false),
-                    _ => s.play(true),
-                });
+                match i {
+                    0 => self.with(|s| s.toggle_rec(RecMode::Rec)),
+                    1 => self.with(|s| s.toggle_rec(RecMode::Overdub)),
+                    2 => self.with(|s| s.stop()),
+                    3 => self.play(false),
+                    _ => self.play(true),
+                }
             }
         }
     }
