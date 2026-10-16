@@ -8,13 +8,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-use crate::program::{Frames, Overlap, PADS, Pad, Sound};
+use crate::program::{Frames, Overlap, PADS, Pad, Sound, Variation};
 use crate::seq::{Note, SEQUENCES, Sequence, TIMING, quantize};
 
 const MAX_VOICES: usize = 64;
 
 pub enum Hit {
-    Press { pad: u8, velocity: u8 },
+    Press { pad: u8, velocity: u8, var: Variation },
     Release { pad: u8 },
 }
 
@@ -276,7 +276,7 @@ impl Shared {
                 continue;
             }
             for n in t.range(tick, tick + 1) {
-                voices.trigger(&self.pads, n.pad, n.velocity);
+                voices.trigger(&self.pads, n.pad, n.velocity, n.var);
                 if self.pads[n.pad as usize].overlap == Overlap::NoteOff {
                     self.t.note_offs.push((n.pad, (tick + n.duration) % len));
                 }
@@ -349,16 +349,16 @@ impl Shared {
 
     fn handle_hit(&mut self, hit: Hit, voices: &mut Voices) {
         match hit {
-            Hit::Press { pad, velocity } => {
+            Hit::Press { pad, velocity, var } => {
                 if self.t.erase && self.t.playing {
                     self.t.erasing[pad as usize] = true;
                     return;
                 }
-                voices.trigger(&self.pads, pad, velocity);
+                voices.trigger(&self.pads, pad, velocity, var);
                 if self.t.playing && self.t.rec != RecMode::Off && self.t.tick >= 0.0 {
                     let (now, len) = (self.now(), self.seq().len());
                     let tick = quantize(now, self.grid(), self.t.swing, len);
-                    self.t.pending.push((Note { tick, pad, velocity, duration: 0 }, Some(now)));
+                    self.t.pending.push((Note { tick, pad, velocity, duration: 0, var }, Some(now)));
                 }
             }
             Hit::Release { pad } => {
@@ -583,7 +583,7 @@ impl Voices {
     }
 
     // Only NOTE OFF voices react to a release; the others play out.
-    fn trigger(&mut self, pads: &[Pad], pad: u8, velocity: u8) {
+    fn trigger(&mut self, pads: &[Pad], pad: u8, velocity: u8, var: Variation) {
         let p = &pads[pad as usize];
         let Some(sound) = &p.sound else { return };
         for m in p.mutes.iter().flatten() {
@@ -597,7 +597,7 @@ impl Voices {
         {
             oldest.cut = Some(CUT_FRAMES);
         }
-        self.voices.push(voice(p, sound, pad, velocity, self.rate));
+        self.voices.push(voice(&p.varied(var), sound, pad, velocity, self.rate));
     }
 
     fn click(&mut self, accent: bool) {
@@ -807,7 +807,7 @@ mod tests {
         assert_eq!(s.t.rec, RecMode::Rec);
         // At 120 BPM a tick is 250 frames; hit pad 0 just after the second sixteenth.
         run(&mut s, &mut v, 250 * 26);
-        s.hits.push(Hit::Press { pad: 0, velocity: 100 });
+        s.hits.push(Hit::Press { pad: 0, velocity: 100, var: None });
         run(&mut s, &mut v, 250 * 10);
         s.hits.push(Hit::Release { pad: 0 });
         run(&mut s, &mut v, 10);
@@ -849,6 +849,24 @@ mod tests {
     }
 
     #[test]
+    fn note_variation_is_recorded_and_plays_back_retuned() {
+        use crate::program::VarParam;
+        let (mut s, mut v) = with_kit(48_000);
+        s.t.count_in = false;
+        s.toggle_rec(RecMode::Overdub);
+        s.play(true);
+        let var = Some((VarParam::Tune, 127));
+        s.hits.push(Hit::Press { pad: 2, velocity: 100, var });
+        run(&mut s, &mut v, 1);
+        // An octave up plays the hi-hat at double speed.
+        assert!(v.voices.iter().any(|v| v.pad == 2 && (v.rate - 2.0).abs() < 0.01));
+        s.hits.push(Hit::Release { pad: 2 });
+        run(&mut s, &mut v, 1);
+        s.stop();
+        assert_eq!(s.seq().tracks[0].notes[0].var, var);
+    }
+
+    #[test]
     fn quick_tap_before_the_grid_line_stays_short() {
         let (mut s, mut v) = with_kit(48_000);
         s.t.count_in = false;
@@ -856,7 +874,7 @@ mod tests {
         s.play(true);
         // Tap at tick 20, released at 22: quantized to 24, which is after the release.
         run(&mut s, &mut v, 250 * 20 + 1);
-        s.hits.push(Hit::Press { pad: 0, velocity: 100 });
+        s.hits.push(Hit::Press { pad: 0, velocity: 100, var: None });
         run(&mut s, &mut v, 250 * 2);
         s.hits.push(Hit::Release { pad: 0 });
         run(&mut s, &mut v, 1);
@@ -870,10 +888,10 @@ mod tests {
         let (mut s, mut v) = with_kit(48_000);
         s.t.count_in = false;
         s.seqs[0].set_bars(1);
-        s.seqs[0].tracks[0].insert(Note { tick: 96, pad: 1, velocity: 90, duration: 10 });
+        s.seqs[0].tracks[0].insert(Note { tick: 96, pad: 1, velocity: 90, duration: 10, var: None });
         s.toggle_rec(RecMode::Rec);
         s.play(true);
-        s.hits.push(Hit::Press { pad: 0, velocity: 100 });
+        s.hits.push(Hit::Press { pad: 0, velocity: 100, var: None });
         run(&mut s, &mut v, 250 * 10);
         s.hits.push(Hit::Release { pad: 0 });
         // The whole first pass: the old note at tick 96 is erased by REC.
@@ -894,7 +912,7 @@ mod tests {
         s.toggle_rec(RecMode::Overdub);
         s.play(true);
         assert_eq!(s.t.tick, -384.0);
-        s.hits.push(Hit::Press { pad: 0, velocity: 100 });
+        s.hits.push(Hit::Press { pad: 0, velocity: 100, var: None });
         run(&mut s, &mut v, 250 * 10);
         s.hits.push(Hit::Release { pad: 0 });
         run(&mut s, &mut v, 250 * 400);
@@ -909,7 +927,7 @@ mod tests {
         s.pads[0].overlap = Overlap::Mono;
         s.pads[1].mutes = [Some(2), None];
         for pad in [0, 0, 2, 1] {
-            s.hits.push(Hit::Press { pad, velocity: 100 });
+            s.hits.push(Hit::Press { pad, velocity: 100, var: None });
         }
         run(&mut s, &mut v, 1);
         // Pad 0's first hit and pad 2 are fading out; pad 0's second hit and pad 1 play on.
@@ -924,7 +942,7 @@ mod tests {
         let (mut s, mut v) = with_kit(48_000);
         s.pads[0].overlap = Overlap::NoteOff;
         s.pads[0].decay = 0;
-        s.hits.push(Hit::Press { pad: 0, velocity: 100 });
+        s.hits.push(Hit::Press { pad: 0, velocity: 100, var: None });
         run(&mut s, &mut v, 100);
         s.hits.push(Hit::Release { pad: 0 });
         run(&mut s, &mut v, 48_000 / 100);
@@ -935,7 +953,7 @@ mod tests {
     fn tune_shortens_playback() {
         let (mut s, mut v) = with_kit(48_000);
         s.pads[2].tune = 120; // one octave up halves the hi-hat's 0.08 s
-        s.hits.push(Hit::Press { pad: 2, velocity: 100 });
+        s.hits.push(Hit::Press { pad: 2, velocity: 100, var: None });
         run(&mut s, &mut v, 1925);
         assert!(v.voices.is_empty());
     }

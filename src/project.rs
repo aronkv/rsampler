@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::audio::{Shared, load_wav};
-use crate::program::{Overlap, PADS, Pad, Sound, pad_name};
+use crate::program::{Overlap, PADS, Pad, Sound, VarParam, pad_name};
 use crate::seq::{Note, SEQUENCES, Sequence, TIMING, TRACKS};
 
 pub const FILE: &str = "rsampler.json";
@@ -78,8 +78,9 @@ struct SeqFile {
 struct TrackFile {
     index: usize,
     on: bool,
-    /// tick, pad, velocity, duration.
-    notes: Vec<[u32; 4]>,
+    /// tick, pad, velocity, duration, and for notes with a NOTE VARIATION its parameter
+    /// (0 TUNE, 1 DECAY, 2 ATTACK, 3 FILTER) and value.
+    notes: Vec<Vec<u32>>,
 }
 
 pub fn is_project(dir: &Path) -> bool {
@@ -154,7 +155,18 @@ fn describe(s: &Shared) -> ProjectFile {
                 .map(|(index, t)| TrackFile {
                     index,
                     on: t.on,
-                    notes: t.notes.iter().map(|n| [n.tick, n.pad as u32, n.velocity as u32, n.duration]).collect(),
+                    notes: t
+                        .notes
+                        .iter()
+                        .map(|n| {
+                            let mut v = vec![n.tick, n.pad as u32, n.velocity as u32, n.duration];
+                            if let Some((param, value)) = n.var {
+                                let index = VarParam::ALL.iter().position(|p| *p == param).unwrap_or(0);
+                                v.extend([index as u32, value as u32]);
+                            }
+                            v
+                        })
+                        .collect(),
                 })
                 .collect();
             let changed = !tracks.is_empty()
@@ -279,13 +291,19 @@ pub fn load(s: &mut Shared, root: &Path) -> Result<(), String> {
         for t in q.tracks.into_iter().filter(|t| t.index < TRACKS) {
             let track = &mut seq.tracks[t.index];
             track.on = t.on;
-            for [tick, pad, velocity, duration] in t.notes {
+            for n in t.notes {
+                let [tick, pad, velocity, duration, ..] = n[..] else { continue };
+                let var = match n[4..] {
+                    [param, value] => VarParam::ALL.get(param as usize).map(|p| (*p, value.min(127) as u8)),
+                    _ => None,
+                };
                 if tick < len && (pad as usize) < PADS {
                     track.insert(Note {
                         tick,
                         pad: pad as u8,
                         velocity: velocity.min(127) as u8,
                         duration: duration.max(1),
+                        var,
                     });
                 }
             }
@@ -353,7 +371,13 @@ mod tests {
         s.pads[3].sound.as_mut().unwrap().start = 100;
         s.seqs[4].tempo = 93.5;
         s.seqs[4].set_bars(4);
-        s.seqs[4].tracks[2].insert(Note { tick: 200, pad: 1, velocity: 77, duration: 30 });
+        s.seqs[4].tracks[2].insert(Note {
+            tick: 200,
+            pad: 1,
+            velocity: 77,
+            duration: 30,
+            var: Some((VarParam::Tune, 90)),
+        });
         s.seqs[4].tracks[5].on = false;
         s.t.swing = 62;
         s.song.steps = vec![(4, 2), (0, 1)];
@@ -388,7 +412,7 @@ mod tests {
         let mut s = audio::offline_shared(48_000);
         let before = fingerprint(&s);
         assert_eq!(before, fingerprint(&s));
-        s.seqs[0].tracks[0].insert(Note { tick: 0, pad: 0, velocity: 1, duration: 1 });
+        s.seqs[0].tracks[0].insert(Note { tick: 0, pad: 0, velocity: 1, duration: 1, var: None });
         assert_ne!(before, fingerprint(&s));
     }
 

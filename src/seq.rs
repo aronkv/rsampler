@@ -15,6 +15,8 @@ pub struct Note {
     pub pad: u8,
     pub velocity: u8,
     pub duration: u32,
+    /// NOTE VARIATION recorded with the note.
+    pub var: crate::program::Variation,
 }
 
 #[derive(Clone, Debug)]
@@ -150,7 +152,7 @@ mod tests {
     fn track_insert_erase_range() {
         let mut t = Track::new();
         for (tick, pad) in [(48, 1), (0, 0), (24, 2), (48, 0)] {
-            t.insert(Note { tick, pad, velocity: 100, duration: 10 });
+            t.insert(Note { tick, pad, velocity: 100, duration: 10, var: None });
         }
         assert_eq!(t.notes.iter().map(|n| n.tick).collect::<Vec<_>>(), [0, 24, 48, 48]);
         assert_eq!(t.range(24, 48).len(), 1);
@@ -164,7 +166,7 @@ mod tests {
     #[test]
     fn shrinking_drops_notes_past_the_end() {
         let mut s = Sequence::default();
-        s.tracks[0].insert(Note { tick: 500, pad: 0, velocity: 100, duration: 10 });
+        s.tracks[0].insert(Note { tick: 500, pad: 0, velocity: 100, duration: 10, var: None });
         s.set_bars(1);
         assert!(s.tracks[0].notes.is_empty());
     }

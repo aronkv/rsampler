@@ -68,6 +68,22 @@ PROGRAM, MIXER, TRIM and LOAD screens work on.
 **16 LEVELS** spreads the selected pad's sound over all 16 pads, from velocity 7 on pad 1 to 127 on
 pad 16. Press it again to go back.
 
+### NOTE VARIATION
+
+The slider changes one pad's sound each time it is hit: drag it, scroll over it, or double-click
+to centre it. **AFTER** opens its ASSIGN screen, where `Pad` chooses the pad and `Param` what the
+slider changes:
+
+| Param  | Slider bottom … top                                  |
+| ------ | ---------------------------------------------------- |
+| TUNE   | one octave down … one octave up (centre = no change) |
+| DECAY  | 0 … 100                                              |
+| ATTACK | 0 … 100                                              |
+| FILTER | closed … open                                        |
+
+The value is recorded with each note and played back with it. On the MPC, AFTER makes pad
+pressure drive the variation; keyboards and mice have no pressure, so here it only opens ASSIGN.
+
 ### Recording a sequence
 
 The MAIN screen (**MAIN SCREEN** or **Esc**) shows the sequencer:
@@ -217,7 +233,7 @@ replaces everything that is open.
 
 ### Not there yet
 
-NOTE VARIATION, MIDI, and the remaining modes (MISC, SETUP, OTHER).
+MIDI, and the remaining modes (MISC, SETUP, OTHER).
 
 Closing the window with unsaved changes shows a warning on the LCD instead; close it again to quit
 without saving.

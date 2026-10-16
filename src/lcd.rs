@@ -43,6 +43,8 @@ pub enum Screen {
     Step,
     Sample,
     Song,
+    /// NOTE VARIATION assign.
+    Assign,
 }
 
 impl Screen {
@@ -57,6 +59,7 @@ impl Screen {
             Screen::Trim => ["PLAY", "", "", "", "", "RESET"],
             Screen::Sample => ["", "", "", "", "", "REC"],
             Screen::Song => ["INSERT", "DELETE", "", "", "", ""],
+            Screen::Assign => ["", "", "", "", "", ""],
         }
     }
 
@@ -108,6 +111,8 @@ pub enum Field {
     SongLoop,
     SongSeq,
     SongReps,
+    VarPad,
+    VarParam,
 }
 
 pub struct Seg {
@@ -167,6 +172,8 @@ pub struct View<'a> {
     pub sample: Option<SampleView>,
     /// Selected step on the SONG screen.
     pub song_step: usize,
+    /// NOTE VARIATION: assigned pad, parameter and slider position.
+    pub var: (usize, crate::program::VarParam, u8),
 }
 
 /// What the SAMPLE screen shows.
@@ -299,6 +306,27 @@ pub fn rows(v: &View) -> Vec<Row> {
                     vec![t(format!("Gain:{:+.1}dB", sv.gain_db))],
                 ),
                 row(vec![t(format!("To pad:{} {}", pad_name(v.pad), sound_name(v)))], vec![]),
+            ];
+            msg(&mut rows);
+            rows
+        }
+        Screen::Assign => {
+            use crate::program::VarParam;
+            let (pad, param, value) = v.var;
+            let base = &s.pads[pad];
+            let varied = base.varied(Some((param, value)));
+            let effect = match param {
+                VarParam::Tune => format!("Tune:{:+.1}", varied.tune as f32 / 10.0),
+                VarParam::Decay => format!("Decay:{}", varied.decay),
+                VarParam::Attack => format!("Attack:{}", varied.attack),
+                VarParam::Filter => format!("Filter:{}", varied.cutoff),
+            };
+            let name = base.sound.as_ref().map_or("(no sound)".to_owned(), |snd| snd.name.chars().take(20).collect());
+            let mut rows = vec![
+                row(vec![t("NOTE VARIATION ASSIGN")], vec![]),
+                row(vec![t("Pad:"), f(Field::VarPad, pad_name(pad)), t(format!("  {name}"))], vec![]),
+                row(vec![t("Param:"), f(Field::VarParam, param.label())], vec![]),
+                row(vec![t(format!("Slider:{value:3}  gives {effect}"))], vec![]),
             ];
             msg(&mut rows);
             rows

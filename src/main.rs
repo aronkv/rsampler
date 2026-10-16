@@ -75,6 +75,10 @@ struct App {
     step: usize,
     /// Selected step on the SONG screen.
     song_step: usize,
+    /// NOTE VARIATION: the pad the slider affects, what it changes, and the slider (0..=127).
+    var_pad: usize,
+    var_param: program::VarParam,
+    var_value: u8,
     velocity: u8,
     message: String,
     message_at: Instant,
@@ -157,6 +161,9 @@ impl App {
             pad: 0,
             step: 0,
             song_step: 0,
+            var_pad: 0,
+            var_param: program::VarParam::Tune,
+            var_value: 64,
             velocity: 0,
             message: error.unwrap_or_default(),
             message_at: Instant::now(),
@@ -210,21 +217,22 @@ impl App {
         if !self.sixteen_levels {
             self.pad = pad;
         }
-        self.with(|s| s.hits.push(Hit::Press { pad: pad as u8, velocity }));
+        let var = (pad == self.var_pad).then_some((self.var_param, self.var_value));
+        self.with(|s| s.hits.push(Hit::Press { pad: pad as u8, velocity, var }));
         if matches!(self.screen, Screen::Step) {
-            self.step_record(pad as u8, velocity);
+            self.step_record(pad as u8, velocity, var);
         }
     }
 
     /// STEP EDIT: a pad hit while stopped adds a note at the current position.
-    fn step_record(&mut self, pad: u8, velocity: u8) {
+    fn step_record(&mut self, pad: u8, velocity: u8, var: program::Variation) {
         let added = self.with(|s| {
             if s.t.playing {
                 return None;
             }
             let (tick, tr) = (s.now(), s.t.track);
             let duration = if s.grid() > 1 { s.grid() } else { seq::PPQ / 4 };
-            let note = seq::Note { tick, pad, velocity, duration };
+            let note = seq::Note { tick, pad, velocity, duration, var };
             let track = &mut s.seq_mut().tracks[tr];
             track.insert(note);
             track.notes.iter().rposition(|n| *n == note)
@@ -304,6 +312,7 @@ impl App {
             editing: self.editing_name,
             step: self.step,
             song_step: self.song_step,
+            var: (self.var_pad, self.var_param, self.var_value),
             sample: self.input.as_ref().map(|input| {
                 let c = input.lock();
                 lcd::SampleView {
@@ -403,6 +412,12 @@ impl App {
         }
         let song_step = self.song_step;
         match field {
+            Field::VarPad => return self.var_pad = (self.var_pad as i32 + d).clamp(0, PADS as i32 - 1) as usize,
+            Field::VarParam => {
+                let all = program::VarParam::ALL;
+                let i = all.iter().position(|p| *p == self.var_param).unwrap_or(0) as i32;
+                return self.var_param = all[(i + d).rem_euclid(all.len() as i32) as usize];
+            }
             Field::SongLoop => return self.with(|s| s.song.looping ^= true),
             Field::SongSeq | Field::SongReps => {
                 return self.with(|s| {
@@ -506,7 +521,9 @@ impl App {
                 | Field::SampleTime
                 | Field::SongLoop
                 | Field::SongSeq
-                | Field::SongReps => {}
+                | Field::SongReps
+                | Field::VarPad
+                | Field::VarParam => {}
             }
         });
     }
@@ -547,7 +564,7 @@ impl App {
                 let name = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
                 self.with(|s| {
                     s.pads[pad].sound = Some(Sound::new(name, frames));
-                    s.hits.push(Hit::Press { pad: pad as u8, velocity: KEY_VELOCITY });
+                    s.hits.push(Hit::Press { pad: pad as u8, velocity: KEY_VELOCITY, var: None });
                 });
                 self.say("Loaded");
             }
@@ -732,7 +749,7 @@ impl App {
                 self.song_step = sel.min(left.saturating_sub(1));
             }
             (Screen::Mixer, 5) => self.with(|s| (s.pads[pad].level, s.pads[pad].pan) = (100, 0)),
-            (Screen::Trim, 0) => self.with(|s| s.hits.push(Hit::Press { pad: pad as u8, velocity: 127 })),
+            (Screen::Trim, 0) => self.with(|s| s.hits.push(Hit::Press { pad: pad as u8, velocity: 127, var: None })),
             (Screen::Trim, 5) => self.with(|s| {
                 if let Some(snd) = &mut s.pads[pad].sound {
                     (snd.start, snd.end) = (0, snd.frames.len());
@@ -768,7 +785,7 @@ impl App {
         self.with(|s| {
             let frames = audio::resample(frames, from, s.rate);
             s.pads[pad].sound = Some(Sound::new(name.clone(), frames.into()));
-            s.hits.push(Hit::Press { pad: pad as u8, velocity: KEY_VELOCITY });
+            s.hits.push(Hit::Press { pad: pad as u8, velocity: KEY_VELOCITY, var: None });
         });
         self.say(format!("Kept {name} on {}", program::pad_name(pad)));
     }
@@ -1263,9 +1280,30 @@ impl App {
         p.label(painter, 86.0, 440.0, "NOTE", 7.0);
         p.label(painter, 86.0, 449.0, "VARIATION", 7.0);
         p.label(painter, 86.0, 462.0, "AFTER", 7.0);
-        led(painter, p, 86.0, 470.0, false, RED_ON, RED_OFF);
-        key(ui, p, p.rect(70.0, 477.0, 32.0, 16.0), &WHITE, "", false);
-        fader(painter, p, 0.5);
+        led(painter, p, 86.0, 470.0, matches!(self.screen, Screen::Assign), RED_ON, RED_OFF);
+        // The hardware's AFTER uses pad pressure, which a keyboard and mouse do not have; the key
+        // opens the slider's ASSIGN screen (SHIFT + AFTER on the MPC).
+        if key(ui, p, p.rect(70.0, 477.0, 32.0, 16.0), &WHITE, "", false).clicked() {
+            self.set_screen(Screen::Assign);
+            self.focus = 0;
+        }
+        let track = p.rect(58.0, 510.0, 54.0, 150.0);
+        let resp = ui.interact(track, ui.scope_id().with("variation"), Sense::click_and_drag());
+        if let Some(pos) = resp.interact_pointer_pos()
+            && (resp.dragged() || resp.clicked())
+        {
+            // The cap's centre runs from y 650 (0) to 520 (127).
+            let v = (p.pos(0.0, 650.0).y - pos.y) / (130.0 * s);
+            self.var_value = (v.clamp(0.0, 1.0) * 127.0).round() as u8;
+        }
+        if resp.hovered() {
+            let scroll = ui.input(|i| i.smooth_scroll_delta.y) / s / 4.0;
+            self.var_value = (self.var_value as f32 + scroll).clamp(0.0, 127.0).round() as u8;
+        }
+        if resp.double_clicked() {
+            self.var_value = 64;
+        }
+        fader(painter, p, self.var_value as f32 / 127.0);
 
         p.label(painter, 205.0, 436.0, "TAP TEMPO", 7.0);
         p.label(painter, 205.0, 445.0, "NOTE REPEAT", 7.0);

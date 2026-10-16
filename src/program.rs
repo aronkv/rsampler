@@ -46,6 +46,31 @@ impl Overlap {
     }
 }
 
+/// What the NOTE VARIATION slider changes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum VarParam {
+    Tune,
+    Decay,
+    Attack,
+    Filter,
+}
+
+impl VarParam {
+    pub const ALL: [VarParam; 4] = [VarParam::Tune, VarParam::Decay, VarParam::Attack, VarParam::Filter];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            VarParam::Tune => "TUNE",
+            VarParam::Decay => "DECAY",
+            VarParam::Attack => "ATTACK",
+            VarParam::Filter => "FILTER",
+        }
+    }
+}
+
+/// A NOTE VARIATION slider position (0..=127) applied to one hit.
+pub type Variation = Option<(VarParam, u8)>;
+
 #[derive(Clone)]
 pub struct Pad {
     pub sound: Option<Sound>,
@@ -88,6 +113,40 @@ impl Default for Pad {
     }
 }
 
+impl Pad {
+    /// The pad's parameters, without the sound, with a NOTE VARIATION applied. TUNE moves up to
+    /// an octave either way from the slider's centre (64); the others replace the setting.
+    pub fn varied(&self, var: Variation) -> Pad {
+        let mut p = Pad {
+            sound: None,
+            tune: self.tune,
+            attack: self.attack,
+            decay: self.decay,
+            decay_from_start: self.decay_from_start,
+            cutoff: self.cutoff,
+            resonance: self.resonance,
+            overlap: self.overlap,
+            mutes: self.mutes,
+            level: self.level,
+            pan: self.pan,
+        };
+        if let Some((param, v)) = var {
+            let scaled = v.min(127) as u32 * 100 / 127;
+            match param {
+                VarParam::Tune => {
+                    // 0..64 and 64..127 each span a full octave.
+                    let offset = (v as i32 - 64) * 120 / if v >= 64 { 63 } else { 64 };
+                    p.tune = (p.tune + offset).clamp(-120, 120);
+                }
+                VarParam::Decay => p.decay = scaled,
+                VarParam::Attack => p.attack = scaled,
+                VarParam::Filter => p.cutoff = scaled,
+            }
+        }
+        p
+    }
+}
+
 /// Pad name as printed on the MPC, e.g. 17 → "B02".
 pub fn pad_name(pad: usize) -> String {
     format!("{}{:02}", ["A", "B", "C", "D"][pad / 16 % 4], pad % 16 + 1)
@@ -102,5 +161,18 @@ mod tests {
         assert_eq!(pad_name(0), "A01");
         assert_eq!(pad_name(17), "B02");
         assert_eq!(pad_name(63), "D16");
+    }
+
+    #[test]
+    fn variation() {
+        let p = Pad { tune: 10, ..Pad::default() };
+        assert_eq!(p.varied(None).tune, 10);
+        assert_eq!(p.varied(Some((VarParam::Tune, 64))).tune, 10);
+        assert_eq!(p.varied(Some((VarParam::Tune, 0))).tune, -110);
+        assert_eq!(p.varied(Some((VarParam::Tune, 127))).tune, 120);
+        assert_eq!(Pad::default().varied(Some((VarParam::Tune, 127))).tune, 120);
+        assert_eq!(Pad::default().varied(Some((VarParam::Tune, 0))).tune, -120);
+        assert_eq!(p.varied(Some((VarParam::Filter, 127))).cutoff, 100);
+        assert_eq!(p.varied(Some((VarParam::Decay, 0))).decay, 0);
     }
 }
