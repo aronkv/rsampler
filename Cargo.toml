@@ -1,0 +1,13 @@
+[package]
+name = "rsampler"
+version = "0.1.0"
+edition = "2024"
+description = "Akai MPC2000XL-inspired sampler desktop app"
+license = "MIT"
+repository = "https://github.com/aronkv/rsampler"
+readme = "README.md"
+keywords = ["sampler", "mpc", "gui", "audio", "music"]
+categories = ["multimedia::audio"]
+
+[dependencies]
+eframe = "0.37.0"
