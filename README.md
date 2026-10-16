@@ -17,7 +17,8 @@ A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.
 
 ## Platforms
 
-Linux first, Windows later.
+Linux first. Windows builds are published too but get less testing; MIDI output is Linux-only
+for now.
 
 ## Install
 
@@ -30,7 +31,8 @@ set `RSAMPLER_INSTALL_DIR` to put it elsewhere. On other systems it builds from 
 [Rust toolchain](https://rustup.rs) and, on Linux, the ALSA development files (the script tells you
 the package name if they are missing). Then start it with `rsampler`.
 
-Prebuilt binaries are also on the [releases page](https://github.com/aronkv/rsampler/releases).
+On Windows, download `rsampler-x86_64-pc-windows-msvc.zip` from the
+[releases page](https://github.com/aronkv/rsampler/releases), unzip it and run `rsampler.exe`.
 
 From a local checkout, `cargo install --path .` does the same, and `cargo run` runs it without
 installing.
@@ -269,6 +271,7 @@ shows the version and the output sample rate.
 ### Not there yet
 
 - Following an external MIDI clock, and MIDI output on Windows
+- Windows-specific testing
 - The MISC mode
 - Loading the MPC's own file formats
 - Windows builds
