@@ -1574,7 +1574,14 @@ fn trim(st: &Shared, pad: usize, painter: &egui::Painter, p: &Panel) {
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1000.0, 730.0]).with_min_inner_size([650.0, 475.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1000.0, 730.0])
+            .with_min_inner_size([650.0, 475.0])
+            // Matches rsampler.desktop, so launchers and taskbars show the right icon.
+            .with_app_id("rsampler")
+            .with_icon(std::sync::Arc::new(
+                eframe::icon_data::from_png_bytes(include_bytes!("../assets/rsampler.png")).expect("bundled icon"),
+            )),
         ..Default::default()
     };
     eframe::run_native("rsampler", options, Box::new(|_| Ok(Box::new(App::new()))))

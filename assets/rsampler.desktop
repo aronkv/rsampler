@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=rsampler
+GenericName=Sampler
+Comment=Sampler and sequencer inspired by the MPC2000XL
+Exec=rsampler
+Icon=rsampler
+Terminal=false
+Categories=AudioVideo;Audio;Music;
+Keywords=sampler;mpc;drum machine;beat;sequencer;
+StartupWMClass=rsampler

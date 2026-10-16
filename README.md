@@ -1,3 +1,5 @@
+<img src="assets/rsampler.svg" alt="" width="96" align="right">
+
 # rsampler
 
 A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.
@@ -27,7 +29,8 @@ curl -fsSL https://raw.githubusercontent.com/aronkv/rsampler/main/install.sh | s
 ```
 
 On Linux x86_64 this downloads the latest prebuilt release (checksum-verified) into `~/.local/bin`;
-set `RSAMPLER_INSTALL_DIR` to put it elsewhere. On other systems it builds from source, which needs the
+set `RSAMPLER_INSTALL_DIR` to put it elsewhere. On Linux it also adds rsampler with its icon to the
+app launcher (`~/.local/share/applications/rsampler.desktop`). On other systems it builds from source, which needs the
 [Rust toolchain](https://rustup.rs) and, on Linux, the ALSA development files (the script tells you
 the package name if they are missing). Then start it with `rsampler`.
 
