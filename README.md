@@ -58,6 +58,9 @@ German) and AZERTY keyboards:
 |        | 5–8   | `A` `S` `D` `F` | `A` `S` `D` `F`    |
 | bottom | 1–4   | `Z` `X` `C` `V` | `Y` `X` `C` `V`    |
 
+Keys pressed together with Shift, Ctrl or Alt never play pads, so shortcuts and symbols such as
+`+` (Shift+3 on a Hungarian keyboard) work.
+
 **PAD BANK A–D** switches between four banks of 16 pads (A01–D16). Bank A starts with a built-in
 kick, snare, hi-hat and clap on pads 1–4. The last pad you hit is the selected pad that the
 PROGRAM, MIXER, TRIM and LOAD screens work on.
@@ -167,6 +170,7 @@ replaces everything that is open.
 | `Ctrl+R` / `Ctrl+O`         | REC / OVERDUB                |
 | `Ctrl+Z`                    | UNDO SEQ                     |
 | `Ctrl+S`                    | Save                         |
+| `+` / `-`                   | DATA wheel                   |
 | `Delete` (hold)             | ERASE                        |
 | `T`                         | TAP TEMPO                    |
 | `,` / `.`                   | STEP < / >                   |
@@ -179,7 +183,10 @@ replaces everything that is open.
 ### Not there yet
 
 Song mode, step editing, sampling from an input, NOTE VARIATION, MIDI, and the remaining modes
-(SONG, MISC, SAMPLE, SETUP, OTHER). Closing the app does not ask about unsaved changes yet.
+(SONG, MISC, SAMPLE, SETUP, OTHER).
+
+Closing the window with unsaved changes shows a warning on the LCD instead; close it again to quit
+without saving.
 
 ## Reference
 

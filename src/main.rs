@@ -96,6 +96,10 @@ struct App {
     /// A replace waiting for its second press of ENTER or DO IT.
     confirm: Option<PathBuf>,
     title_changed: bool,
+    /// Fingerprint of the project as last saved or loaded, to spot unsaved work.
+    saved: u64,
+    /// When closing was refused because of unsaved work; closing again soon after quits.
+    close_warned: Option<Instant>,
 }
 
 /// Something the keyboard asked for this frame.
@@ -131,6 +135,7 @@ impl App {
         }
         let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         let music = home.join("Music");
+        let saved = project::fingerprint(&audio::lock(&engine.shared));
         Self {
             engine,
             screen: Screen::Main,
@@ -157,6 +162,8 @@ impl App {
             replace_name: false,
             confirm: None,
             title_changed: false,
+            saved,
+            close_warned: None,
         }
     }
 
@@ -413,6 +420,7 @@ impl App {
         self.confirm = None;
         match self.with(|s| project::load(s, &path)) {
             Ok(()) => {
+                self.saved = self.with(|s| project::fingerprint(s));
                 self.save_name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
                 self.project = Some(path);
                 self.title_changed = true;
@@ -429,9 +437,12 @@ impl App {
         match self.project.clone() {
             Some(root) => {
                 let dir = root.parent().map(PathBuf::from).unwrap_or_default();
-                let result = self.with(|s| project::save(s, &dir, &self.save_name));
+                let result = self.with(|s| project::save(s, &dir, &self.save_name).map(|_| project::fingerprint(s)));
                 match result {
-                    Ok(_) => self.say(format!("Saved {}", self.save_name)),
+                    Ok(saved) => {
+                        self.saved = saved;
+                        self.say(format!("Saved {}", self.save_name));
+                    }
                     Err(e) => self.say(e),
                 }
             }
@@ -460,9 +471,10 @@ impl App {
             return;
         }
         self.confirm = None;
-        let result = self.with(|s| project::save(s, &dir, &name));
+        let result = self.with(|s| project::save(s, &dir, &name).map(|root| (root, project::fingerprint(s))));
         match result {
-            Ok(root) => {
+            Ok((root, saved)) => {
+                self.saved = saved;
                 self.project = Some(root);
                 self.save_name = name;
                 self.title_changed = true;
@@ -637,8 +649,10 @@ impl App {
             let egui::Event::Key { key, physical_key, pressed, repeat, modifiers } = e else { continue };
             let command = modifiers.ctrl || modifiers.command || modifiers.alt;
             // Pads follow physical positions, so QWERTZ and AZERTY keyboards get the same grid.
+            // With a modifier held the key is a shortcut or a symbol instead (Shift+3 is `+` on a
+            // Hungarian keyboard), but a pad still gets its release.
             if let Some(n) = PAD_KEYS.iter().position(|k| *k == physical_key.unwrap_or(key))
-                && !command
+                && ((!command && !modifiers.shift) || (!pressed && self.key_held[n]))
             {
                 if !repeat && pressed != self.key_held[n] {
                     self.key_held[n] = pressed;
@@ -706,6 +720,7 @@ impl eframe::App for App {
             self.message.clear();
         }
         self.keyboard(ui);
+        self.guard_close(ui);
         if std::mem::take(&mut self.title_changed) {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(format!("rsampler - {}", self.save_name)));
         }
@@ -718,6 +733,19 @@ impl eframe::App for App {
 }
 
 impl App {
+    /// Closing with unsaved work is refused once with a warning; closing again quits.
+    fn guard_close(&mut self, ui: &Ui) {
+        if !ui.input(|i| i.viewport().close_requested()) {
+            return;
+        }
+        let warned = self.close_warned.is_some_and(|t| t.elapsed() < Duration::from_secs(10));
+        if !warned && self.with(|s| project::fingerprint(s)) != self.saved {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.close_warned = Some(Instant::now());
+            self.say("Unsaved! Close again to quit, Ctrl+S saves");
+        }
+    }
+
     fn panel(&mut self, ui: &mut Ui) {
         let area = ui.max_rect();
         let scale = (area.width() / W).min(area.height() / H);

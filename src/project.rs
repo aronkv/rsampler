@@ -1,6 +1,7 @@
 //! Saving and loading a whole project: a folder with `rsampler.json` and one WAV per pad sound.
 
 use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -76,36 +77,18 @@ pub fn is_project(dir: &Path) -> bool {
     dir.join(FILE).is_file()
 }
 
-/// Writes the project into `dir/name`, replacing an earlier save there.
-pub fn save(s: &Shared, dir: &Path, name: &str) -> Result<PathBuf, String> {
-    let root = dir.join(name);
-    let sounds = root.join("sounds");
-    if root.exists() && !is_project(&root) {
-        return Err(format!("{name} exists and is not a project"));
-    }
-    // Sound files from an earlier save may belong to pads that are empty now.
-    if sounds.is_dir() {
-        fs::remove_dir_all(&sounds).map_err(|e| e.to_string())?;
-    }
-    fs::create_dir_all(&sounds).map_err(|e| e.to_string())?;
-
+/// The project as it is written to `rsampler.json`.
+fn describe(s: &Shared) -> ProjectFile {
     let default = Pad::default();
     let mut pads = Vec::new();
     for (i, p) in s.pads.iter().enumerate() {
-        let sound = match &p.sound {
-            Some(snd) => {
-                let file = format!("sounds/{}.wav", pad_name(i));
-                write_wav(&root.join(&file), snd, s.rate).map_err(|e| format!("{file}: {e}"))?;
-                Some(SoundFile {
-                    name: snd.name.clone(),
-                    file,
-                    frames: snd.frames.len(),
-                    start: snd.start,
-                    end: snd.end,
-                })
-            }
-            None => None,
-        };
+        let sound = p.sound.as_ref().map(|snd| SoundFile {
+            name: snd.name.clone(),
+            file: sound_file(i),
+            frames: snd.frames.len(),
+            start: snd.start,
+            end: snd.end,
+        });
         let changed = sound.is_some()
             || (
                 p.tune,
@@ -180,7 +163,7 @@ pub fn save(s: &Shared, dir: &Path, name: &str) -> Result<PathBuf, String> {
         })
         .collect();
 
-    let file = ProjectFile {
+    ProjectFile {
         version: VERSION,
         master: s.master,
         timing: s.t.timing,
@@ -189,13 +172,48 @@ pub fn save(s: &Shared, dir: &Path, name: &str) -> Result<PathBuf, String> {
         click: s.t.click,
         pads,
         sequences,
-    };
-    let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
-    // Write next to the target and rename, so a failed save never leaves a half-written project.
+    }
+}
+
+fn sound_file(pad: usize) -> String {
+    format!("sounds/{}.wav", pad_name(pad))
+}
+
+/// Writes the project into `dir/name`, replacing an earlier save there.
+pub fn save(s: &Shared, dir: &Path, name: &str) -> Result<PathBuf, String> {
+    let root = dir.join(name);
+    let sounds = root.join("sounds");
+    if root.exists() && !is_project(&root) {
+        return Err(format!("{name} exists and is not a project"));
+    }
+    // Sound files from an earlier save may belong to pads that are empty now.
+    if sounds.is_dir() {
+        fs::remove_dir_all(&sounds).map_err(|e| e.to_string())?;
+    }
+    fs::create_dir_all(&sounds).map_err(|e| e.to_string())?;
+    for (i, p) in s.pads.iter().enumerate() {
+        if let Some(snd) = &p.sound {
+            let file = sound_file(i);
+            write_wav(&root.join(&file), snd, s.rate).map_err(|e| format!("{file}: {e}"))?;
+        }
+    }
+    let json = serde_json::to_string_pretty(&describe(s)).map_err(|e| e.to_string())?;
+    // Write next to the target and rename, so a failed write never leaves a half-written JSON file.
     let tmp = root.join(format!("{FILE}.tmp"));
     fs::write(&tmp, json).map_err(|e| e.to_string())?;
     fs::rename(&tmp, root.join(FILE)).map_err(|e| e.to_string())?;
     Ok(root)
+}
+
+/// Changes whenever anything that would be saved changes, to tell whether there is unsaved work.
+pub fn fingerprint(s: &Shared) -> u64 {
+    let mut h = DefaultHasher::new();
+    serde_json::to_string(&describe(s)).unwrap_or_default().hash(&mut h);
+    // Sound contents only change by replacing the frames, so their identity is enough.
+    for p in &s.pads {
+        p.sound.as_ref().map(|snd| std::sync::Arc::as_ptr(&snd.frames) as *const u8 as usize).hash(&mut h);
+    }
+    h.finish()
 }
 
 /// Replaces the current project with the one in `root`.
@@ -335,6 +353,15 @@ mod tests {
         assert_eq!(t.seqs[4].tracks[2].notes, s.seqs[4].tracks[2].notes);
         assert!(!t.seqs[4].tracks[5].on);
         assert_eq!(t.t.swing, 62);
+    }
+
+    #[test]
+    fn fingerprint_tracks_changes() {
+        let mut s = audio::offline_shared(48_000);
+        let before = fingerprint(&s);
+        assert_eq!(before, fingerprint(&s));
+        s.seqs[0].tracks[0].insert(Note { tick: 0, pad: 0, velocity: 1, duration: 1 });
+        assert_ne!(before, fingerprint(&s));
     }
 
     #[test]
