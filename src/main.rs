@@ -70,6 +70,8 @@ struct App {
     focus: usize,
     /// Selected program pad, 0..64: the last one hit.
     pad: usize,
+    /// Selected note on the STEP EDIT screen.
+    step: usize,
     velocity: u8,
     message: String,
     message_at: Instant,
@@ -141,6 +143,7 @@ impl App {
             screen: Screen::Main,
             focus: 0,
             pad: 0,
+            step: 0,
             velocity: 0,
             message: error.unwrap_or_default(),
             message_at: Instant::now(),
@@ -189,6 +192,66 @@ impl App {
             self.pad = pad;
         }
         self.with(|s| s.hits.push(Hit::Press { pad: pad as u8, velocity }));
+        if matches!(self.screen, Screen::Step) {
+            self.step_record(pad as u8, velocity);
+        }
+    }
+
+    /// STEP EDIT: a pad hit while stopped adds a note at the current position.
+    fn step_record(&mut self, pad: u8, velocity: u8) {
+        let added = self.with(|s| {
+            if s.t.playing {
+                return None;
+            }
+            let (tick, tr) = (s.now(), s.t.track);
+            let duration = if s.grid() > 1 { s.grid() } else { seq::PPQ / 4 };
+            let note = seq::Note { tick, pad, velocity, duration };
+            let track = &mut s.seq_mut().tracks[tr];
+            track.insert(note);
+            track.notes.iter().rposition(|n| *n == note)
+        });
+        if let Some(i) = added {
+            self.step = i;
+        }
+    }
+
+    /// Selects the `i`th note of the current track on STEP EDIT and moves Now to it.
+    fn select_note(&mut self, i: isize) {
+        self.step = self.with(|s| {
+            let tr = s.t.track;
+            let notes = &s.seq().tracks[tr].notes;
+            let i = i.clamp(0, notes.len().saturating_sub(1) as isize) as usize;
+            if let Some(n) = notes.get(i) {
+                let tick = n.tick;
+                s.locate(tick);
+            }
+            i
+        });
+    }
+
+    /// Changes a field of the selected note on STEP EDIT, keeping the track sorted.
+    fn edit_note(&mut self, field: Field, d: i32) {
+        let (sel, fine) = (self.step, self.shift);
+        let moved = self.with(|s| {
+            let (tr, len, grid) = (s.t.track, s.seq().len(), s.grid());
+            let track = &mut s.seq_mut().tracks[tr];
+            let mut n = *track.notes.get(sel)?;
+            let unit = if fine { 1 } else { grid } as i64;
+            match field {
+                Field::NotePos => n.tick = (n.tick as i64 + d as i64 * unit).rem_euclid(len as i64) as u32,
+                Field::NotePad => n.pad = (n.pad as i32 + d).clamp(0, PADS as i32 - 1) as u8,
+                Field::NoteVel => n.velocity = (n.velocity as i32 + d).clamp(1, 127) as u8,
+                _ => n.duration = (n.duration as i64 + d as i64 * unit).clamp(1, len as i64) as u32,
+            }
+            track.notes.remove(sel);
+            track.insert(n);
+            let i = track.notes.iter().rposition(|m| *m == n)?;
+            s.locate(n.tick);
+            Some(i)
+        });
+        if let Some(i) = moved {
+            self.step = i;
+        }
     }
 
     fn pad_release(&mut self, n: usize) {
@@ -216,6 +279,7 @@ impl App {
             message: &self.message,
             name: &self.save_name,
             editing: self.editing_name,
+            step: self.step,
         })
     }
 
@@ -241,6 +305,11 @@ impl App {
             }
             // Level and Pan share one row; up selects Level, down selects Pan.
             Screen::Mixer => self.focus = (dy > 0) as usize,
+            // Up and down pick the note; left and right move between its fields.
+            Screen::Step if dy != 0 => {
+                self.select_note(self.step as isize + dy as isize);
+                self.focus = self.focus.max(1);
+            }
             _ => {
                 let fields = self.fields();
                 if fields.is_empty() {
@@ -284,6 +353,12 @@ impl App {
         if field == Field::Pad {
             self.pad = (pad as i32 + d).clamp(0, PADS as i32 - 1) as usize;
             return;
+        }
+        if matches!(field, Field::NotePos | Field::NotePad | Field::NoteVel | Field::NoteDur) {
+            return self.edit_note(field, d);
+        }
+        if field == Field::Track {
+            self.step = 0;
         }
         self.with(|s| {
             let grid = s.grid();
@@ -361,7 +436,7 @@ impl App {
                         }
                     }
                 }
-                Field::Pad => {}
+                Field::Pad | Field::NotePos | Field::NotePad | Field::NoteVel | Field::NoteDur => {}
             }
         });
     }
@@ -512,7 +587,36 @@ impl App {
     fn soft_key(&mut self, i: usize) {
         let pad = self.pad;
         match (&self.screen, i) {
-            (Screen::Main, 0) => self.timing_correct(),
+            (Screen::Main, 0) => {
+                // Edits on this screen can be undone together with UNDO SEQ.
+                let first = self.with(|s| {
+                    s.checkpoint();
+                    let now = s.now();
+                    s.seq().tracks[s.t.track].notes.partition_point(|n| n.tick < now)
+                });
+                self.set_screen(Screen::Step);
+                self.select_note(first as isize);
+                self.focus = 1;
+            }
+            (Screen::Step, 0) => {
+                let sel = self.step;
+                self.with(|s| {
+                    let tr = s.t.track;
+                    let notes = &mut s.seq_mut().tracks[tr].notes;
+                    if sel < notes.len() {
+                        notes.remove(sel);
+                    }
+                });
+                self.select_note(sel as isize);
+            }
+            (Screen::Step, 4) => {
+                self.with(|s| s.t.track = s.t.track.saturating_sub(1));
+                self.select_note(0);
+            }
+            (Screen::Step, 5) => {
+                self.with(|s| s.t.track = (s.t.track + 1).min(seq::TRACKS - 1));
+                self.select_note(0);
+            }
             (Screen::Main, 1) => self.with(|s| s.undo()),
             (Screen::Main, 2) => self.with(|s| {
                 let tr = s.t.track;

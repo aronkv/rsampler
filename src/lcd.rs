@@ -40,12 +40,14 @@ pub enum Screen {
     Program,
     Mixer,
     Trim,
+    Step,
 }
 
 impl Screen {
     pub fn soft_keys(&self) -> [&'static str; 6] {
         match self {
-            Screen::Main => ["T/C", "UNDO", "TR.ON", "SOLO", "TR -", "TR +"],
+            Screen::Main => ["STEP", "UNDO", "TR.ON", "SOLO", "TR -", "TR +"],
+            Screen::Step => ["DELETE", "", "", "", "TR -", "TR +"],
             Screen::Load(_) => ["UP DIR", "SAVE", "", "", "", "DO IT"],
             Screen::Save(_) => ["UP DIR", "", "", "", "NAME", "DO IT"],
             Screen::Program => ["LOAD", "TRIM", "MIXER", "", "", "CLEAR"],
@@ -92,6 +94,10 @@ pub enum Field {
     Pan,
     Start,
     End,
+    NotePos,
+    NotePad,
+    NoteVel,
+    NoteDur,
 }
 
 pub struct Seg {
@@ -146,6 +152,8 @@ pub struct View<'a> {
     /// Project name on the SAVE screen, and whether it is being typed.
     pub name: &'a str,
     pub editing: bool,
+    /// Selected note on the STEP EDIT screen.
+    pub step: usize,
 }
 
 fn status(s: &Shared) -> &'static str {
@@ -232,6 +240,49 @@ pub fn rows(v: &View) -> Vec<Row> {
             } else {
                 msg(&mut rows);
             }
+            rows
+        }
+        Screen::Step => {
+            let seq = s.seq();
+            let tr = s.t.track;
+            let notes = &seq.tracks[tr].notes;
+            let mut rows = vec![row(
+                vec![
+                    t("STEP EDIT  Tr:"),
+                    f(Field::Track, format!("{:02}", tr + 1)),
+                    t(format!("  {} notes", notes.len())),
+                ],
+                vec![t(format!("Now:{}", seq.bbt(s.now())))],
+            )];
+            let name = |pad: u8| {
+                s.pads[pad as usize].sound.as_ref().map_or(String::new(), |snd| snd.name.chars().take(8).collect())
+            };
+            let start = v.step.saturating_sub(1).min(notes.len().saturating_sub(4));
+            for (i, n) in notes.iter().enumerate().skip(start).take(4) {
+                let (pos, pad, vel, dur) =
+                    (seq.bbt(n.tick), pad_name(n.pad as usize), format!("{:3}", n.velocity), n.duration.to_string());
+                let left = if i == v.step {
+                    vec![
+                        f(Field::NotePos, pos),
+                        t(" "),
+                        f(Field::NotePad, pad),
+                        t(format!(" {:<8}", name(n.pad))),
+                        t(" Vel:"),
+                        f(Field::NoteVel, vel),
+                        t(" Dur:"),
+                        f(Field::NoteDur, dur),
+                    ]
+                } else {
+                    vec![t(format!("{pos} {pad} {:<8}  Vel:{vel} Dur:{dur}", name(n.pad)))]
+                };
+                rows.push(row(left, vec![]));
+            }
+            if notes.is_empty() {
+                rows.push(row(vec![t("(no notes)")], vec![]));
+            }
+            rows.resize_with(5, Row::default);
+            let hint = if v.message.is_empty() { "Pads add a note at Now" } else { v.message };
+            rows.push(row(vec![t(hint)], vec![t(status(s))]));
             rows
         }
         Screen::Program => {

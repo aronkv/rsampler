@@ -3,7 +3,7 @@
 A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.
 
 > **Status:** early development. Pads, programs, mixer, trimming, a 99-sequence, 64-track sequencer
-> and saving projects work. Song mode, step editing, sampling and MIDI are still missing.
+> step editing and saving projects work. Song mode, sampling and MIDI are still missing.
 
 ## Goals
 
@@ -94,8 +94,8 @@ To record:
 
 **REC** erases what is on the track as the playhead passes, and turns into **OVERDUB** after the
 first loop so the new take is kept. Pressing **REC** or **OVERDUB** while playing punches in or out.
-Notes are quantized to `Timing` as they are recorded; **T/C** (F1, or **OPEN WINDOW** on the
-`Timing` field) quantizes a whole track afterwards.
+Notes are quantized to `Timing` as they are recorded; **OPEN WINDOW** on the `Timing` field (timing
+correct) quantizes a whole track afterwards.
 
 **UNDO SEQ** (F2, `Ctrl+Z`) takes back the last recording or edit; its light shows that it can.
 Hold **ERASE** (or `Delete`) while playing and hold pads to delete their notes as the playhead
@@ -104,6 +104,15 @@ passes. **TR.ON** (F3) and **TRACK MUTE** mute the track, **SOLO** (F4) plays on
 
 **LOCATE**: **STEP <** / **>** move by the `Timing` grid, **BAR <<** / **>>** by a bar, and
 **GO TO** returns to the start. **STOP** pressed while stopped also returns to the start.
+
+### STEP EDIT
+
+**STEP** (F1 on the MAIN screen) lists the notes of the current track. **↑** / **↓** choose a note
+and move `Now` to it; **←** / **→** move between its position, pad, velocity and duration, and the
+DATA wheel changes them (position and duration move by the `Timing` grid, or by single ticks with
+Shift). Hitting a pad while stopped adds a note at `Now`, so you can step-record with **STEP <** /
+**>**. **DELETE** (F1) removes the selected note, **TR -** / **TR +** change track, and **UNDO SEQ**
+takes back everything done since opening the screen.
 
 ### PROGRAM: how each pad plays
 
@@ -182,7 +191,7 @@ replaces everything that is open.
 
 ### Not there yet
 
-Song mode, step editing, sampling from an input, NOTE VARIATION, MIDI, and the remaining modes
+Song mode, sampling from an input, NOTE VARIATION, MIDI, and the remaining modes
 (SONG, MISC, SAMPLE, SETUP, OTHER).
 
 Closing the window with unsaved changes shows a warning on the LCD instead; close it again to quit
