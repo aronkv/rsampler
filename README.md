@@ -1,8 +1,18 @@
-<img src="assets/rsampler.svg" alt="" width="96" align="right">
+<p align="center">
+  <img src="assets/rsampler.svg" alt="rsampler icon" width="128">
+</p>
 
-# rsampler
+<h1 align="center">rsampler</h1>
 
-A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.
+<p align="center">
+  <a href="https://github.com/aronkv/rsampler/releases/latest"><img src="https://img.shields.io/github/v/release/aronkv/rsampler" alt="Latest release"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Language: Rust"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/aronkv/rsampler" alt="License: Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey" alt="Platforms: Linux, Windows">
+  <a href="https://github.com/aronkv/rsampler/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/aronkv/rsampler/release.yml?label=release%20build" alt="Release build"></a>
+</p>
+
+<p align="center">A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.</p>
 
 > **Status:** early development, but usable: pads, programs, mixer, trimming, a 99-sequence,
 > 64-track sequencer, song mode, step editing, sampling from the input, MIDI in, out and clock,
