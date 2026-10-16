@@ -632,7 +632,7 @@ pub fn load_wav(path: &Path, rate: u32) -> Result<Frames, hound::Error> {
 
 // ponytail: linear interpolation aliases when downsampling; switch to a windowed-sinc
 // resampler (e.g. rubato) if high-rate samples sound harsh.
-fn resample(x: &[[f32; 2]], from: u32, to: u32) -> Vec<[f32; 2]> {
+pub fn resample(x: &[[f32; 2]], from: u32, to: u32) -> Vec<[f32; 2]> {
     if from == to || x.is_empty() {
         return x.to_vec();
     }

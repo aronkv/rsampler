@@ -3,6 +3,7 @@ mod lcd;
 mod panel;
 mod program;
 mod project;
+mod sample;
 mod seq;
 
 use std::path::PathBuf;
@@ -102,6 +103,15 @@ struct App {
     saved: u64,
     /// When closing was refused because of unsaved work; closing again soon after quits.
     close_warned: Option<Instant>,
+    /// The audio input, open only while the SAMPLE screen is shown.
+    input: Option<sample::Input>,
+    sample_mono: bool,
+    /// dBFS; below −60 means off.
+    sample_threshold: i32,
+    sample_time: u32,
+    /// REC GAIN knob, 0..1 for −12..+12 dB.
+    rec_gain: f32,
+    samples_taken: u32,
 }
 
 /// Something the keyboard asked for this frame.
@@ -167,6 +177,12 @@ impl App {
             title_changed: false,
             saved,
             close_warned: None,
+            input: None,
+            sample_mono: false,
+            sample_threshold: -40,
+            sample_time: 4,
+            rec_gain: 0.5,
+            samples_taken: 0,
         }
     }
 
@@ -264,6 +280,10 @@ impl App {
             self.load_dir = b.dir.clone();
         }
         self.screen = screen;
+        if !matches!(self.screen, Screen::Sample) {
+            // Closes the input device, so it is only in use on the SAMPLE screen.
+            self.input = None;
+        }
         self.editing_name = false;
         self.confirm = None;
         self.focus = 0;
@@ -280,6 +300,18 @@ impl App {
             name: &self.save_name,
             editing: self.editing_name,
             step: self.step,
+            sample: self.input.as_ref().map(|input| {
+                let c = input.lock();
+                lcd::SampleView {
+                    input: input.name.clone(),
+                    state: c.state,
+                    seconds: c.frames.len() as f32 / c.rate as f32,
+                    mono: self.sample_mono,
+                    threshold: self.sample_threshold,
+                    time: self.sample_time,
+                    gain_db: self.rec_gain * 24.0 - 12.0,
+                }
+            }),
         })
     }
 
@@ -360,6 +392,12 @@ impl App {
         if field == Field::Track {
             self.step = 0;
         }
+        match field {
+            Field::SampleMode => return self.sample_mono ^= true,
+            Field::Threshold => return self.sample_threshold = (self.sample_threshold + d).clamp(-61, 0),
+            Field::SampleTime => return self.sample_time = (self.sample_time as i32 + d).clamp(1, 60) as u32,
+            _ => {}
+        }
         self.with(|s| {
             let grid = s.grid();
             let p = &mut s.pads[pad];
@@ -436,7 +474,14 @@ impl App {
                         }
                     }
                 }
-                Field::Pad | Field::NotePos | Field::NotePad | Field::NoteVel | Field::NoteDur => {}
+                Field::Pad
+                | Field::NotePos
+                | Field::NotePad
+                | Field::NoteVel
+                | Field::NoteDur
+                | Field::SampleMode
+                | Field::Threshold
+                | Field::SampleTime => {}
             }
         });
     }
@@ -639,6 +684,7 @@ impl App {
                 self.with(|s| s.pads[pad].sound = None);
                 self.say("Sound removed");
             }
+            (Screen::Sample, 4 | 5) => self.sample_key(i),
             (Screen::Mixer, 5) => self.with(|s| (s.pads[pad].level, s.pads[pad].pan) = (100, 0)),
             (Screen::Trim, 0) => self.with(|s| s.hits.push(Hit::Press { pad: pad as u8, velocity: 127 })),
             (Screen::Trim, 5) => self.with(|s| {
@@ -647,6 +693,49 @@ impl App {
                 }
             }),
             _ => {}
+        }
+    }
+
+    /// SAMPLE soft keys: REC arms and STOP ends a take; then RETRY (F5) or KEEP (F6).
+    fn sample_key(&mut self, i: usize) {
+        use sample::State;
+        let Some(input) = &self.input else { return };
+        let mut c = input.lock();
+        match (c.state, i) {
+            (State::Idle, 5) => c.arm(),
+            (State::Armed | State::Recording, 5) => c.stop(),
+            (State::Done, 4) => c.arm(),
+            (State::Done, 5) => {
+                let (frames, from) = (std::mem::take(&mut c.frames), c.rate);
+                c.state = State::Idle;
+                drop(c);
+                self.keep_sample(&frames, from);
+            }
+            _ => {}
+        }
+    }
+
+    fn keep_sample(&mut self, frames: &[[f32; 2]], from: u32) {
+        self.samples_taken += 1;
+        let name = format!("SAMPLE{:02}", self.samples_taken);
+        let pad = self.pad;
+        self.with(|s| {
+            let frames = audio::resample(frames, from, s.rate);
+            s.pads[pad].sound = Some(Sound::new(name.clone(), frames.into()));
+            s.hits.push(Hit::Press { pad: pad as u8, velocity: KEY_VELOCITY });
+        });
+        self.say(format!("Kept {name} on {}", program::pad_name(pad)));
+    }
+
+    /// Keeps the input's settings in step with the screen and the REC GAIN knob.
+    fn sync_input(&self) {
+        if let Some(input) = &self.input {
+            let mut c = input.lock();
+            c.gain = 10f32.powf((self.rec_gain * 24.0 - 12.0) / 20.0);
+            c.mono = self.sample_mono;
+            c.threshold =
+                if self.sample_threshold < -60 { 0.0 } else { 10f32.powf(self.sample_threshold as f32 / 20.0) };
+            c.max_frames = self.sample_time as usize * c.rate as usize;
         }
     }
 
@@ -677,6 +766,13 @@ impl App {
             "TRIM" => self.set_screen(Screen::Trim),
             "PROGRAM" => self.set_screen(Screen::Program),
             "MIXER" => self.set_screen(Screen::Mixer),
+            "SAMPLE" => {
+                self.set_screen(Screen::Sample);
+                match sample::Input::open() {
+                    Ok(input) => self.input = Some(input),
+                    Err(e) => self.say(e),
+                }
+            }
             "" => {}
             other => self.say(format!("{other} is not available yet")),
         }
@@ -775,6 +871,7 @@ impl App {
                 Key::Z if modifiers.ctrl => Action::Undo,
                 Key::S if modifiers.ctrl => Action::Save,
                 Key::Num3 if command => Action::Mode("LOAD"),
+                Key::Num4 if command => Action::Mode("SAMPLE"),
                 Key::Num5 if command => Action::Mode("TRIM"),
                 Key::Num6 if command => Action::Mode("PROGRAM"),
                 Key::Num8 if command => Action::Mode("MIXER"),
@@ -830,7 +927,8 @@ impl eframe::App for App {
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(BACKDROP)).show(ui, |ui| self.panel(ui));
         // Keep the LCD position and LEDs moving while the sequencer runs.
-        if self.with(|s| s.t.playing) || !self.message.is_empty() {
+        self.sync_input();
+        if self.with(|s| s.t.playing) || !self.message.is_empty() || self.input.is_some() {
             ui.ctx().request_repaint_after(Duration::from_millis(30));
         }
     }
@@ -933,10 +1031,17 @@ impl App {
         match self.screen {
             Screen::Mixer => self.mixer(&st, painter, p),
             Screen::Trim => trim(&st, self.pad, painter, p),
+            Screen::Sample => self.meters(painter, p),
             _ => {}
         }
 
-        for (i, label) in self.screen.soft_keys().iter().enumerate() {
+        let keys = match (&self.screen, self.input.as_ref().map(|i| i.lock().state)) {
+            (Screen::Sample, Some(sample::State::Armed | sample::State::Recording)) => ["", "", "", "", "", "STOP"],
+            (Screen::Sample, Some(sample::State::Done)) => ["", "", "", "", "RETRY", "KEEP"],
+            (Screen::Sample, None) => [""; 6],
+            (screen, _) => screen.soft_keys(),
+        };
+        for (i, label) in keys.iter().enumerate() {
             let tab = p.rect(163.0 + i as f32 * 41.0, 133.0, 36.0, 9.5);
             if !label.is_empty() {
                 painter.rect_filled(tab, 0.0, LCD_INK);
@@ -989,6 +1094,27 @@ impl App {
             }
             let color = if selected { LCD_BG } else { LCD_INK };
             painter.text(label.center(), Align2::CENTER_CENTER, format!("{:02}", i + 1), p.mono(6.0), color);
+        }
+    }
+
+    /// SAMPLE screen input meters, −60..0 dBFS, with the threshold marked.
+    fn meters(&self, painter: &egui::Painter, p: &Panel) {
+        let Some(input) = &self.input else { return };
+        let peak = input.lock().peak;
+        let s = p.scale;
+        let (x0, w) = (LCD_X + 14.0, LCD_W - 20.0);
+        let pos = |db: f32| x0 + w * ((db + 60.0) / 60.0).clamp(0.0, 1.0);
+        for (ch, level) in peak.iter().enumerate() {
+            let y = LCD_Y + 3.0 * ROW_H + 2.0 + ch as f32 * 9.0;
+            painter.text(p.pos(LCD_X + 3.0, y + 3.5), Align2::LEFT_CENTER, ["L", "R"][ch], p.mono(7.0), LCD_INK);
+            painter.rect_stroke(p.rect(x0, y, w, 7.0), 0.0, Stroke::new(0.7 * s, LCD_INK), StrokeKind::Inside);
+            let x1 = pos(sample::db(*level));
+            painter.rect_filled(p.rect(x0, y, x1 - x0, 7.0), 0.0, LCD_INK);
+        }
+        if self.sample_threshold >= -60 {
+            let x = p.pos(pos(self.sample_threshold as f32), 0.0).x;
+            let (y0, y1) = (p.pos(0.0, LCD_Y + 3.0 * ROW_H).y, p.pos(0.0, LCD_Y + 3.0 * ROW_H + 20.0).y);
+            painter.vline(x, y0..=y1, Stroke::new(1.5 * s, LCD_INK));
         }
     }
 
@@ -1182,7 +1308,15 @@ impl App {
         }
 
         p.label(painter, 790.0, 135.0, "REC GAIN", 8.0);
-        knob(painter, p, p.pos(790.0, 170.0), 20.0, Color32::from_rgb(0xe9, 0xa0, 0xa6), 0.35);
+        let center = p.pos(790.0, 170.0);
+        let resp = ui.interact(
+            Rect::from_center_size(center, vec2(52.0, 52.0) * s),
+            ui.scope_id().with("gain"),
+            Sense::drag(),
+        );
+        let scroll = if resp.hovered() { ui.input(|i| i.smooth_scroll_delta.y) } else { 0.0 };
+        self.rec_gain = (self.rec_gain + (-resp.drag_delta().y + scroll) / s / 120.0).clamp(0.0, 1.0);
+        knob(painter, p, center, 20.0, Color32::from_rgb(0xe9, 0xa0, 0xa6), self.rec_gain);
         p.label(painter, 885.0, 135.0, "MAIN VOLUME", 8.0);
         let center = p.pos(885.0, 170.0);
         let resp = ui.interact(

@@ -41,6 +41,7 @@ pub enum Screen {
     Mixer,
     Trim,
     Step,
+    Sample,
 }
 
 impl Screen {
@@ -53,6 +54,7 @@ impl Screen {
             Screen::Program => ["LOAD", "TRIM", "MIXER", "", "", "CLEAR"],
             Screen::Mixer => ["", "", "", "", "", "RESET"],
             Screen::Trim => ["PLAY", "", "", "", "", "RESET"],
+            Screen::Sample => ["", "", "", "", "", "REC"],
         }
     }
 
@@ -98,6 +100,9 @@ pub enum Field {
     NotePad,
     NoteVel,
     NoteDur,
+    SampleMode,
+    Threshold,
+    SampleTime,
 }
 
 pub struct Seg {
@@ -154,6 +159,19 @@ pub struct View<'a> {
     pub editing: bool,
     /// Selected note on the STEP EDIT screen.
     pub step: usize,
+    pub sample: Option<SampleView>,
+}
+
+/// What the SAMPLE screen shows.
+pub struct SampleView {
+    pub input: String,
+    pub state: crate::sample::State,
+    pub seconds: f32,
+    pub mono: bool,
+    /// dBFS; below −60 means off.
+    pub threshold: i32,
+    pub time: u32,
+    pub gain_db: f32,
 }
 
 fn status(s: &Shared) -> &'static str {
@@ -240,6 +258,41 @@ pub fn rows(v: &View) -> Vec<Row> {
             } else {
                 msg(&mut rows);
             }
+            rows
+        }
+        Screen::Sample => {
+            use crate::sample::State;
+            let Some(sv) = &v.sample else {
+                let mut rows = vec![row(vec![t("SAMPLE")], vec![])];
+                msg(&mut rows);
+                return rows;
+            };
+            let state = match sv.state {
+                State::Idle => "READY".to_owned(),
+                State::Armed => "WAITING FOR INPUT".to_owned(),
+                State::Recording => format!("REC {:.1}s", sv.seconds),
+                State::Done => format!("{:.2}s  KEEP OR RETRY?", sv.seconds),
+            };
+            let input: String = sv.input.chars().take(36).collect();
+            let mut rows = vec![
+                row(vec![t(format!("SAMPLE  In:{input}"))], vec![t(state)]),
+                row(
+                    vec![
+                        t("Mode:"),
+                        f(Field::SampleMode, if sv.mono { "MONO" } else { "STEREO" }),
+                        t("  Threshold:"),
+                        f(
+                            Field::Threshold,
+                            if sv.threshold < -60 { "OFF".to_owned() } else { format!("{}dB", sv.threshold) },
+                        ),
+                        t("  Time:"),
+                        f(Field::SampleTime, format!("{}s", sv.time)),
+                    ],
+                    vec![t(format!("Gain:{:+.1}dB", sv.gain_db))],
+                ),
+                row(vec![t(format!("To pad:{} {}", pad_name(v.pad), sound_name(v)))], vec![]),
+            ];
+            msg(&mut rows);
             rows
         }
         Screen::Step => {

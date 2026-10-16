@@ -3,7 +3,7 @@
 A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.
 
 > **Status:** early development. Pads, programs, mixer, trimming, a 99-sequence, 64-track sequencer
-> step editing and saving projects work. Song mode, sampling and MIDI are still missing.
+> step editing, sampling and saving projects work. Song mode and MIDI are still missing.
 
 ## Goals
 
@@ -153,6 +153,22 @@ The blue **5 / TRIM** key shows the selected pad's waveform. `St` and `End` set 
 
 WAV files of any bit depth and sample rate work, mono or stereo.
 
+### SAMPLE: recording from the input
+
+The blue **4 / SAMPLE** key (`Ctrl+4`) opens the default audio input; it is closed again when you
+leave the screen. Hit the pad the new sound should go to, then:
+
+| Field       | What it does                                                            |
+| ----------- | ----------------------------------------------------------------------- |
+| `Mode`      | STEREO, or MONO (both channels mixed)                                   |
+| `Threshold` | The recording starts when the input gets this loud; OFF starts at once   |
+| `Time`      | Longest take, 1–60 seconds                                              |
+
+**REC GAIN** (drag or scroll) sets the input level from −12 to +12 dB; the meters show the input
+from −60 to 0 dBFS with the threshold marked. **REC** (F6) waits for the threshold and records,
+**STOP** ends the take early, then **KEEP** (F6) puts it on the pad as `SAMPLExx` and plays it, or
+**RETRY** (F5) records again. Use TRIM afterwards to cut off silence.
+
 ### Saving and loading projects
 
 A project is a folder holding `rsampler.json` (sequences, pad settings, mixer) and the pad sounds as
@@ -186,13 +202,12 @@ replaces everything that is open.
 | `Page Up` / `Page Down`     | BAR << / >>                  |
 | `Home`                      | GO TO start                  |
 | `F1`–`F6`                   | Soft keys                    |
-| `Ctrl+3` / `5` / `6` / `8`  | LOAD / TRIM / PROGRAM / MIXER |
+| `Ctrl+3` / `4` / `5` / `6` / `8` | LOAD / SAMPLE / TRIM / PROGRAM / MIXER |
 | `Esc`                       | MAIN SCREEN                  |
 
 ### Not there yet
 
-Song mode, sampling from an input, NOTE VARIATION, MIDI, and the remaining modes
-(SONG, MISC, SAMPLE, SETUP, OTHER).
+Song mode, NOTE VARIATION, MIDI, and the remaining modes (SONG, MISC, SETUP, OTHER).
 
 Closing the window with unsaved changes shows a warning on the LCD instead; close it again to quit
 without saving.
