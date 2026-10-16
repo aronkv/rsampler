@@ -1,7 +1,9 @@
 //! MIDI input: notes 36–99 (C1–D#6) play pads A01–D16 with their velocity. rsampler connects to
 //! every MIDI input it finds and, on Linux, also offers its own "rsampler" input port.
+//!
+//! MIDI output goes to an "rsampler" output port on Linux, for synths and DAWs to connect to.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 use midir::{Ignore, MidiInput, MidiInputConnection};
 
@@ -66,6 +68,27 @@ impl Midi {
         }
         added
     }
+}
+
+/// Opens the output port and returns where to send messages; `None` on Windows, which has no
+/// virtual MIDI ports.
+pub fn start_out() -> Option<mpsc::Sender<[u8; 3]>> {
+    #[cfg(unix)]
+    {
+        use midir::os::unix::VirtualOutput;
+        let mut conn = midir::MidiOutput::new("rsampler").ok()?.create_virtual("rsampler").ok()?;
+        let (tx, rx) = mpsc::channel::<[u8; 3]>();
+        // The audio thread must not wait on the MIDI system, so a thread does the sending.
+        std::thread::spawn(move || {
+            for msg in rx {
+                let len = if msg[0] >= 0xF8 { 1 } else { 3 };
+                let _ = conn.send(&msg[..len]);
+            }
+        });
+        Some(tx)
+    }
+    #[cfg(not(unix))]
+    None
 }
 
 fn input() -> Option<MidiInput> {

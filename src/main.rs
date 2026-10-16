@@ -158,6 +158,7 @@ impl App {
         let music = home.join("Music");
         let saved = project::fingerprint(&audio::lock(&engine.shared));
         let midi = midi::Midi::start(engine.shared.clone());
+        audio::lock(&engine.shared).midi_out = midi::start_out();
         Self {
             engine,
             screen: Screen::Main,
@@ -438,6 +439,19 @@ impl App {
                 });
             }
             Field::SampleMode => return self.sample_mono ^= true,
+            Field::ClockOut => return self.with(|s| s.t.clock_out ^= true),
+            Field::KeyVelocity => {
+                return self.with(|s| s.key_velocity = (s.key_velocity as i32 + d).clamp(1, 127) as u8);
+            }
+            Field::TrackOut => {
+                return self.with(|s| {
+                    let tr = s.t.track;
+                    let out = &mut s.seq_mut().tracks[tr].out;
+                    // −1 stands for OFF, below channel 1.
+                    let ch = (out.map_or(-1, |c| c as i32) + d).clamp(-1, 15);
+                    *out = (ch >= 0).then_some(ch as u8);
+                });
+            }
             Field::Threshold => return self.sample_threshold = (self.sample_threshold + d).clamp(-61, 0),
             Field::SampleTime => return self.sample_time = (self.sample_time as i32 + d).clamp(1, 60) as u32,
             _ => {}
@@ -530,7 +544,10 @@ impl App {
                 | Field::SongSeq
                 | Field::SongReps
                 | Field::VarPad
-                | Field::VarParam => {}
+                | Field::VarParam
+                | Field::TrackOut
+                | Field::ClockOut
+                | Field::KeyVelocity => {}
             }
         });
     }
@@ -855,6 +872,8 @@ impl App {
             "TRIM" => self.set_screen(Screen::Trim),
             "PROGRAM" => self.set_screen(Screen::Program),
             "MIXER" => self.set_screen(Screen::Mixer),
+            "SETUP" => self.set_screen(Screen::Setup),
+            "OTHER" => self.set_screen(Screen::Other),
             "SONG" => {
                 self.set_screen(Screen::Song);
                 self.focus = 1;
@@ -910,7 +929,10 @@ impl App {
 
     fn run(&mut self, action: Action) {
         match action {
-            Action::Pad(n, true) => self.pad_press(n, KEY_VELOCITY),
+            Action::Pad(n, true) => {
+                let velocity = self.with(|s| s.key_velocity);
+                self.pad_press(n, velocity);
+            }
             Action::Pad(n, false) => self.pad_release(n),
             Action::PlayStop => {
                 if self.with(|s| s.t.playing) {
@@ -980,6 +1002,8 @@ impl App {
                 Key::Num5 if command => Action::Mode("TRIM"),
                 Key::Num6 if command => Action::Mode("PROGRAM"),
                 Key::Num8 if command => Action::Mode("MIXER"),
+                Key::Num7 if command => Action::Mode("SETUP"),
+                Key::Num9 if command => Action::Mode("OTHER"),
                 Key::ArrowLeft => Action::Cursor(-1, 0),
                 Key::ArrowRight => Action::Cursor(1, 0),
                 Key::ArrowUp => Action::Cursor(0, -1),

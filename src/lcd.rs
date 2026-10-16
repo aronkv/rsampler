@@ -45,6 +45,8 @@ pub enum Screen {
     Song,
     /// NOTE VARIATION assign.
     Assign,
+    Setup,
+    Other,
 }
 
 impl Screen {
@@ -59,7 +61,7 @@ impl Screen {
             Screen::Trim => ["PLAY", "", "", "", "", "RESET"],
             Screen::Sample => ["", "", "", "", "", "REC"],
             Screen::Song => ["INSERT", "DELETE", "", "", "", ""],
-            Screen::Assign => ["", "", "", "", "", ""],
+            Screen::Assign | Screen::Setup | Screen::Other => ["", "", "", "", "", ""],
         }
     }
 
@@ -113,6 +115,9 @@ pub enum Field {
     SongReps,
     VarPad,
     VarParam,
+    TrackOut,
+    ClockOut,
+    KeyVelocity,
 }
 
 pub struct Seg {
@@ -259,6 +264,8 @@ pub fn rows(v: &View) -> Vec<Row> {
                         t(format!("-Track-{:02}", tr + 1)),
                         t("  On:"),
                         f(Field::TrackOn, if track.on { "YES" } else { "NO" }),
+                        t("  Out:"),
+                        f(Field::TrackOut, track.out.map_or("OFF".to_owned(), |ch| (ch + 1).to_string())),
                         t(if s.t.solo == Some(tr) { "  SOLO" } else { "" }),
                     ],
                     vec![t(if track.notes.is_empty() { "(Unused)" } else { "(Used)" })],
@@ -306,6 +313,30 @@ pub fn rows(v: &View) -> Vec<Row> {
                     vec![t(format!("Gain:{:+.1}dB", sv.gain_db))],
                 ),
                 row(vec![t(format!("To pad:{} {}", pad_name(v.pad), sound_name(v)))], vec![]),
+            ];
+            msg(&mut rows);
+            rows
+        }
+        Screen::Setup => {
+            let mut rows = vec![
+                row(vec![t("SETUP")], vec![]),
+                row(vec![t("MIDI clock out:"), f(Field::ClockOut, on_off(s.t.clock_out))], vec![]),
+                row(vec![t("Keyboard pad velocity:"), f(Field::KeyVelocity, s.key_velocity.to_string())], vec![]),
+                row(
+                    vec![t(if s.midi_out.is_some() { "MIDI out port: rsampler" } else { "MIDI out: not available" })],
+                    vec![],
+                ),
+            ];
+            msg(&mut rows);
+            rows
+        }
+        Screen::Other => {
+            let mut rows = vec![
+                row(vec![t(format!("rsampler {}", env!("CARGO_PKG_VERSION")))], vec![]),
+                row(vec![t("Sampler and sequencer after the MPC2000XL")], vec![]),
+                row(vec![t(format!("Output: {} Hz", s.rate))], vec![]),
+                row(vec![t("Apache License 2.0")], vec![]),
+                row(vec![t("github.com/aronkv/rsampler")], vec![]),
             ];
             msg(&mut rows);
             rows

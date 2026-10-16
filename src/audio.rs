@@ -4,7 +4,7 @@
 use std::error::Error;
 use std::f32::consts::{PI, TAU};
 use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, mpsc};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
@@ -59,6 +59,10 @@ pub struct Transport {
     pub undo: Option<(usize, Sequence)>,
     /// Playing the song: the step, and how many times it has repeated so far.
     pub song: Option<(usize, u32)>,
+    /// Send MIDI clock, start and stop.
+    pub clock_out: bool,
+    /// MIDI notes sent from the sequence that still need their note off: status, note, tick.
+    midi_offs: Vec<(u8, u8, u32)>,
 }
 
 /// Song mode: sequences played in order, each repeated a number of times.
@@ -77,6 +81,11 @@ pub struct Shared {
     /// Pad hits from the UI, consumed by the audio callback.
     pub hits: Vec<Hit>,
     pub rate: u32,
+    /// MIDI output, if one could be opened. Messages are [status, data, data]; real-time
+    /// messages (clock, start, stop) only use the status byte.
+    pub midi_out: Option<mpsc::Sender<[u8; 3]>>,
+    /// Velocity of pads hit from the computer keyboard.
+    pub key_velocity: u8,
 }
 
 impl Shared {
@@ -106,10 +115,14 @@ impl Shared {
                 note_offs: Vec::new(),
                 undo: None,
                 song: None,
+                clock_out: false,
+                midi_offs: Vec::new(),
             },
             master: 0.8,
             hits: Vec::new(),
             rate,
+            midi_out: None,
+            key_velocity: 101,
         }
     }
 
@@ -141,6 +154,27 @@ impl Shared {
         }
         self.t.next_tick = self.t.tick.ceil() as i64;
         self.t.playing = true;
+        if self.t.clock_out {
+            if start == 0.0 {
+                self.send([0xFA, 0, 0]);
+            } else {
+                // Song position pointer, in sixteenths (24 ticks), then continue from there.
+                let sixteenths = start as u32 / 24;
+                self.send([0xF2, (sixteenths & 0x7F) as u8, (sixteenths >> 7 & 0x7F) as u8]);
+                self.send([0xFB, 0, 0]);
+            }
+        }
+    }
+
+    fn send(&self, msg: [u8; 3]) {
+        if let Some(out) = &self.midi_out {
+            let _ = out.send(msg);
+        }
+    }
+
+    /// MIDI channel of the selected track, for passing pad hits through.
+    fn thru(&self) -> Option<u8> {
+        self.seq().tracks[self.t.track].out
     }
 
     /// Plays the song from `step`. Song mode does not record.
@@ -156,6 +190,9 @@ impl Shared {
         self.t.tick = 0.0;
         self.t.next_tick = 0;
         self.t.playing = true;
+        if self.t.clock_out {
+            self.send([0xFA, 0, 0]);
+        }
         true
     }
 
@@ -170,6 +207,12 @@ impl Shared {
         self.commit_pending();
         for (pad, _) in self.t.note_offs.drain(..) {
             self.hits.push(Hit::Release { pad });
+        }
+        for (status, note, _) in std::mem::take(&mut self.t.midi_offs) {
+            self.send([status, note, 0]);
+        }
+        if self.t.clock_out {
+            self.send([0xFC, 0, 0]);
         }
         self.t.playing = false;
         self.t.rec = RecMode::Off;
@@ -245,6 +288,10 @@ impl Shared {
 
     /// Handles everything due at `tick`: metronome, count-in, recording erase and note playback.
     fn on_tick(&mut self, tick: i64, voices: &mut Voices) {
+        // MIDI clock runs at 24 per quarter note, every 4 of our ticks.
+        if self.t.clock_out && tick.rem_euclid(4) == 0 {
+            self.send([0xF8, 0, 0]);
+        }
         let seq = self.seq();
         let tpb = seq.ticks_per_beat() as i64;
         let recording = self.t.rec != RecMode::Off;
@@ -267,6 +314,15 @@ impl Shared {
             }
         }
 
+        let mut i = 0;
+        while i < self.t.midi_offs.len() {
+            if self.t.midi_offs[i].2 == tick {
+                let (status, note, _) = self.t.midi_offs.swap_remove(i);
+                self.send([status, note, 0]);
+            } else {
+                i += 1;
+            }
+        }
         let mut i = 0;
         while i < self.t.note_offs.len() {
             if self.t.note_offs[i].1 == tick {
@@ -296,6 +352,11 @@ impl Shared {
                 continue;
             }
             for n in t.range(tick, tick + 1) {
+                if let (Some(ch), Some(out)) = (t.out, &self.midi_out) {
+                    let note = n.pad + crate::midi::FIRST_NOTE;
+                    let _ = out.send([0x90 | ch, note, n.velocity]);
+                    self.t.midi_offs.push((0x80 | ch, note, (tick + n.duration.max(1)) % len));
+                }
                 voices.trigger(&self.pads, n.pad, n.velocity, n.var);
                 if self.pads[n.pad as usize].overlap == Overlap::NoteOff {
                     self.t.note_offs.push((n.pad, (tick + n.duration) % len));
@@ -376,6 +437,9 @@ impl Shared {
                     return;
                 }
                 voices.trigger(&self.pads, pad, velocity, var);
+                if let Some(ch) = self.thru() {
+                    self.send([0x90 | ch, pad + crate::midi::FIRST_NOTE, velocity]);
+                }
                 if self.t.playing && self.t.rec != RecMode::Off && self.t.tick >= 0.0 {
                     let (now, len) = (self.now(), self.seq().len());
                     let tick = quantize(now, self.grid(), self.t.swing, len);
@@ -385,6 +449,9 @@ impl Shared {
             Hit::Release { pad } => {
                 self.t.held[pad as usize] = None;
                 self.t.erasing[pad as usize] = false;
+                if let Some(ch) = self.thru() {
+                    self.send([0x80 | ch, pad + crate::midi::FIRST_NOTE, 0]);
+                }
                 voices.release(pad);
                 let len = self.seq().len();
                 let now = self.now();
@@ -798,6 +865,35 @@ mod tests {
             s.pads[pad].sound = Some(sound);
         }
         (s, v)
+    }
+
+    #[test]
+    fn midi_out_sends_clock_notes_and_stop() {
+        let (mut s, mut v) = with_kit(48_000);
+        let (tx, rx) = mpsc::channel();
+        s.midi_out = Some(tx);
+        s.t.clock_out = true;
+        s.seqs[0].tracks[1].out = Some(9);
+        s.seqs[0].tracks[1].insert(Note { tick: 0, pad: 2, velocity: 99, duration: 6, var: None });
+        s.play(true);
+        // Eight ticks: clocks at 0 and 4, the note at 0 and its note off at 6.
+        run(&mut s, &mut v, 250 * 8);
+        s.stop();
+        let msgs: Vec<[u8; 3]> = rx.try_iter().collect();
+        assert_eq!(msgs, [[0xFA, 0, 0], [0xF8, 0, 0], [0x99, 38, 99], [0xF8, 0, 0], [0x89, 38, 0], [0xFC, 0, 0]]);
+    }
+
+    #[test]
+    fn play_from_the_middle_sends_song_position_then_continue() {
+        let (mut s, _) = with_kit(48_000);
+        let (tx, rx) = mpsc::channel();
+        s.midi_out = Some(tx);
+        s.t.clock_out = true;
+        s.seqs[0].set_bars(64);
+        s.locate(200 * 24);
+        s.play(false);
+        let msgs: Vec<[u8; 3]> = rx.try_iter().collect();
+        assert_eq!(msgs, [[0xF2, 200 & 0x7F, 1], [0xFB, 0, 0]]);
     }
 
     #[test]

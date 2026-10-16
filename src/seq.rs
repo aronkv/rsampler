@@ -22,13 +22,15 @@ pub struct Note {
 #[derive(Clone, Debug)]
 pub struct Track {
     pub on: bool,
+    /// MIDI channel (0..16) the track's notes are sent on, if any.
+    pub out: Option<u8>,
     /// Sorted by tick.
     pub notes: Vec<Note>,
 }
 
 impl Track {
     fn new() -> Self {
-        Self { on: true, notes: Vec::new() }
+        Self { on: true, out: None, notes: Vec::new() }
     }
 
     pub fn insert(&mut self, note: Note) {

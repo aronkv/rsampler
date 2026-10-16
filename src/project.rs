@@ -27,6 +27,20 @@ struct ProjectFile {
     sequences: Vec<SeqFile>,
     #[serde(default)]
     song: SongFile,
+    #[serde(default)]
+    setup: SetupFile,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SetupFile {
+    clock_out: bool,
+    key_velocity: u8,
+}
+
+impl Default for SetupFile {
+    fn default() -> Self {
+        Self { clock_out: false, key_velocity: 101 }
+    }
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -78,6 +92,8 @@ struct SeqFile {
 struct TrackFile {
     index: usize,
     on: bool,
+    #[serde(default)]
+    out: Option<u8>,
     /// tick, pad, velocity, duration, and for notes with a NOTE VARIATION its parameter
     /// (0 TUNE, 1 DECAY, 2 ATTACK, 3 FILTER) and value.
     notes: Vec<Vec<u32>>,
@@ -151,10 +167,11 @@ fn describe(s: &Shared) -> ProjectFile {
                 .tracks
                 .iter()
                 .enumerate()
-                .filter(|(_, t)| !t.on || !t.notes.is_empty())
+                .filter(|(_, t)| !t.on || t.out.is_some() || !t.notes.is_empty())
                 .map(|(index, t)| TrackFile {
                     index,
                     on: t.on,
+                    out: t.out,
                     notes: t
                         .notes
                         .iter()
@@ -197,6 +214,7 @@ fn describe(s: &Shared) -> ProjectFile {
             steps: s.song.steps.iter().map(|&(seq, reps)| [seq as u32, reps]).collect(),
             looping: s.song.looping,
         },
+        setup: SetupFile { clock_out: s.t.clock_out, key_velocity: s.key_velocity },
     }
 }
 
@@ -314,6 +332,7 @@ pub fn load(root: &Path, rate: u32) -> Result<Loaded, String> {
         for t in q.tracks.into_iter().filter(|t| t.index < TRACKS) {
             let track = &mut seq.tracks[t.index];
             track.on = t.on;
+            track.out = t.out.filter(|ch| *ch < 16);
             for n in t.notes {
                 let [tick, pad, velocity, duration, ..] = n[..] else { continue };
                 let var = match n[4..] {
@@ -360,6 +379,8 @@ impl Loaded {
         s.t.swing = file.swing.clamp(50, 75);
         s.t.count_in = file.count_in;
         s.t.click = file.click;
+        s.t.clock_out = file.setup.clock_out;
+        s.key_velocity = file.setup.key_velocity.clamp(1, 127);
         s.t.seq = 0;
         s.t.track = 0;
         s.t.solo = None;
@@ -409,6 +430,9 @@ mod tests {
             var: Some((VarParam::Tune, 90)),
         });
         s.seqs[4].tracks[5].on = false;
+        s.seqs[4].tracks[6].out = Some(3);
+        s.t.clock_out = true;
+        s.key_velocity = 90;
         s.t.swing = 62;
         s.song.steps = vec![(4, 2), (0, 1)];
         s.song.looping = true;
@@ -433,6 +457,8 @@ mod tests {
         assert_eq!((t.seqs[4].tempo, t.seqs[4].bars), (93.5, 4));
         assert_eq!(t.seqs[4].tracks[2].notes, s.seqs[4].tracks[2].notes);
         assert!(!t.seqs[4].tracks[5].on);
+        assert_eq!(t.seqs[4].tracks[6].out, Some(3));
+        assert_eq!((t.t.clock_out, t.key_velocity), (true, 90));
         assert_eq!(t.t.swing, 62);
         assert_eq!(t.song, s.song);
     }

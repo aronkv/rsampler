@@ -3,8 +3,8 @@
 A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.
 
 > **Status:** early development, but usable: pads, programs, mixer, trimming, a 99-sequence,
-> 64-track sequencer, song mode, step editing, sampling from the input, MIDI input and project
-> saving all work. See [Not there yet](#not-there-yet) for what is missing.
+> 64-track sequencer, song mode, step editing, sampling from the input, MIDI in, out and clock,
+> and project saving all work. See [Not there yet](#not-there-yet) for what is missing.
 
 ## Goals
 
@@ -53,7 +53,7 @@ between its fields, and the **DATA** wheel changes the highlighted field. The si
 ### Pads
 
 Click a pad or hit its key. On the mouse, hitting higher on a pad plays louder; keys always play at
-velocity 101, and **FULL LEVEL** makes everything 127.
+velocity 101 (changeable in SETUP), and **FULL LEVEL** makes everything 127.
 
 The keys follow their physical position, so the layout works the same on QWERTY, QWERTZ (Hungarian,
 German) and AZERTY keyboards:
@@ -108,6 +108,7 @@ The MAIN screen (**MAIN SCREEN** or **Esc**) shows the sequencer:
 | `Loop`        | Loop the sequence                                                    |
 | `Bars`        | Sequence length                                                      |
 | `Tr`, `On`    | Track 1–64 and whether it plays                                      |
+| `Out`         | MIDI channel the track's notes are sent on (see [MIDI](#midi)), OFF by default |
 
 To record:
 
@@ -228,10 +229,23 @@ without saving.
 
 ### MIDI
 
-rsampler listens to every MIDI input it finds, including controllers plugged in while it runs, and
-on Linux it also offers its own `rsampler` input port for other programs. Notes 36–99 (C1–D#6)
-play pads A01–D16 with their velocity, whatever bank is selected, and are recorded like pad hits.
-Most 16-pad controllers send 36–51 by default, which lands on bank A.
+**In:** rsampler listens to every MIDI input it finds, including controllers plugged in while it
+runs, and on Linux it also offers its own `rsampler` input port for other programs. Notes 36–99
+(C1–D#6) play pads A01–D16 with their velocity, whatever bank is selected, and are recorded like
+pad hits. Most 16-pad controllers send 36–51 by default, which lands on bank A.
+
+**Out (Linux):** connect a synth or DAW to the `rsampler` output port. A track whose `Out` field is
+set to a channel sends its notes there as it plays (pad A01 = note 36 again), and pads you hit pass
+through on the selected track's channel, so the pads can play an external synth.
+
+**Clock:** with `MIDI clock out` on in SETUP, rsampler sends MIDI clock while playing, and start,
+stop, or song position and continue, so a DAW or drum machine can follow its tempo.
+
+### SETUP and OTHER
+
+The blue **7 / SETUP** key (`Ctrl+7`) holds `MIDI clock out` and the velocity of pads hit from the
+computer keyboard (101 by default); both are saved with the project. **9 / OTHER** (`Ctrl+9`)
+shows the version and the output sample rate.
 
 ### Keyboard shortcuts
 
@@ -249,13 +263,13 @@ Most 16-pad controllers send 36–51 by default, which lands on bank A.
 | `Page Up` / `Page Down`     | BAR << / >>                  |
 | `Home`                      | GO TO start                  |
 | `F1`–`F6`                   | Soft keys                    |
-| `Ctrl+1` / `3` / `4` / `5` / `6` / `8` | SONG / LOAD / SAMPLE / TRIM / PROGRAM / MIXER |
+| `Ctrl+1` / `3`–`9`          | SONG / LOAD, SAMPLE, TRIM, PROGRAM, SETUP, MIXER, OTHER |
 | `Esc`                       | MAIN SCREEN                  |
 
 ### Not there yet
 
-- MIDI output and MIDI clock sync
-- The MISC, SETUP and OTHER modes
+- Following an external MIDI clock, and MIDI output on Windows
+- The MISC mode
 - Loading the MPC's own file formats
 - Windows builds
 
