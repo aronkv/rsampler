@@ -1,4 +1,8 @@
+mod audio;
+
 use std::f32::consts::PI;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use eframe::egui::{
     self, Align2, Color32, FontId, Key, Painter, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, vec2,
@@ -77,7 +81,10 @@ const PAD_KEYS: [Key; 16] = [
 ];
 
 const BANKS: [&str; 4] = ["A", "B", "C", "D"];
-const SOFT_KEYS: [&str; 6] = ["STEP", "EDIT", "TR.MUTE", "SOLO", "TR -", "TR +"];
+const MAIN_SOFT_KEYS: [&str; 6] = ["STEP", "EDIT", "TR.MUTE", "SOLO", "TR -", "TR +"];
+const LOAD_SOFT_KEYS: [&str; 6] = ["UP DIR", "", "", "", "", "DO IT"];
+/// Velocity for pads hit from the keyboard, which has no pressure.
+const KEY_VELOCITY: f32 = 0.8;
 /// Numeric keypad, top row first, with the mode each key opens.
 const KEYPAD: [(&str, &str); 10] = [
     ("7", "SETUP"),
@@ -131,8 +138,55 @@ impl Panel {
     }
 }
 
-#[derive(Default)]
+struct Slot {
+    name: String,
+    data: audio::Sample,
+}
+
+/// LOAD screen: a directory listing of subfolders and WAV files.
+struct Browser {
+    dir: PathBuf,
+    entries: Vec<PathBuf>,
+    cursor: usize,
+}
+
+impl Browser {
+    fn open(dir: PathBuf) -> Self {
+        let visible = |p: &Path| !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'));
+        let mut entries: Vec<PathBuf> = fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| visible(p) && (p.is_dir() || is_wav(p)))
+            .collect();
+        entries.sort_by_key(|p| (!p.is_dir(), p.file_name().map(|n| n.to_string_lossy().to_lowercase())));
+        Self { dir, entries, cursor: 0 }
+    }
+}
+
+fn is_wav(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav"))
+}
+
+enum Screen {
+    Main,
+    Load(Browser),
+}
+
 struct App {
+    engine: Option<audio::Engine>,
+    /// Four banks of 16 pads.
+    slots: Vec<Option<Slot>>,
+    screen: Screen,
+    load_dir: PathBuf,
+    /// Last error or confirmation, shown on the LCD until the screen changes.
+    message: String,
+    held: [bool; 16],
+    wheel_drag: f32,
+    wheel_angle: f32,
+    volume: f32,
+    velocity: f32,
     bank: usize,
     last_pad: Option<usize>,
     playing: bool,
@@ -140,6 +194,130 @@ struct App {
     overdub: bool,
     full_level: bool,
     sixteen_levels: bool,
+}
+
+impl App {
+    fn new() -> Self {
+        let (engine, message) = match audio::Engine::new() {
+            Ok(engine) => (Some(engine), String::new()),
+            Err(e) => (None, format!("Audio: {e}")),
+        };
+        let mut slots: Vec<Option<Slot>> = (0..64).map(|_| None).collect();
+        if let Some(engine) = &engine {
+            for (slot, (name, data)) in slots.iter_mut().zip(audio::builtin_kit(engine.rate)) {
+                *slot = Some(Slot { name: name.to_owned(), data });
+            }
+        }
+        let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let music = home.join("Music");
+        Self {
+            engine,
+            slots,
+            screen: Screen::Main,
+            load_dir: if music.is_dir() { music } else { home },
+            message,
+            held: [false; 16],
+            wheel_drag: 0.0,
+            wheel_angle: 0.0,
+            volume: 0.8,
+            velocity: 0.0,
+            bank: 0,
+            last_pad: None,
+            playing: false,
+            rec: false,
+            overdub: false,
+            full_level: false,
+            sixteen_levels: false,
+        }
+    }
+
+    fn slot(&self, pad: usize) -> &Option<Slot> {
+        &self.slots[self.bank * 16 + pad]
+    }
+
+    fn hit_pad(&mut self, pad: usize, velocity: f32) {
+        self.last_pad = Some(pad);
+        self.velocity = if self.full_level { 1.0 } else { velocity };
+        if let (Some(engine), Some(slot)) = (&self.engine, self.slot(pad)) {
+            engine.play(&slot.data, self.velocity);
+        }
+    }
+
+    fn set_screen(&mut self, screen: Screen) {
+        if let Screen::Load(b) = &self.screen {
+            self.load_dir = b.dir.clone();
+        }
+        self.screen = screen;
+        self.message.clear();
+    }
+
+    fn move_cursor(&mut self, steps: isize) {
+        if let Screen::Load(b) = &mut self.screen {
+            let last = b.entries.len().saturating_sub(1);
+            b.cursor = b.cursor.saturating_add_signed(steps).min(last);
+        }
+    }
+
+    fn parent_dir(&mut self) {
+        if let Screen::Load(b) = &mut self.screen
+            && let Some(parent) = b.dir.parent()
+        {
+            let from = b.dir.clone();
+            *b = Browser::open(parent.to_owned());
+            b.cursor = b.entries.iter().position(|e| *e == from).unwrap_or(0);
+        }
+    }
+
+    /// ENTER on the LOAD screen: opens a folder, or loads a WAV into the selected pad.
+    fn enter(&mut self) {
+        let Screen::Load(b) = &mut self.screen else { return };
+        let Some(path) = b.entries.get(b.cursor).cloned() else { return };
+        if path.is_dir() {
+            *b = Browser::open(path);
+            return;
+        }
+        let Some(engine) = &self.engine else {
+            self.message = "No audio device".to_owned();
+            return;
+        };
+        let pad = self.last_pad.unwrap_or(0);
+        match audio::load_wav(&path, engine.rate) {
+            Ok(data) => {
+                engine.play(&data, KEY_VELOCITY);
+                let name = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+                self.slots[self.bank * 16 + pad] = Some(Slot { name, data });
+                self.message = "Loaded".to_owned();
+            }
+            Err(e) => self.message = e.to_string(),
+        }
+    }
+
+    fn keyboard(&mut self, ui: &Ui) {
+        let (up, down, enter, back, esc) = ui.input(|i| {
+            (
+                i.key_pressed(Key::ArrowUp),
+                i.key_pressed(Key::ArrowDown),
+                i.key_pressed(Key::Enter) || i.key_pressed(Key::ArrowRight),
+                i.key_pressed(Key::Backspace) || i.key_pressed(Key::ArrowLeft),
+                i.key_pressed(Key::Escape),
+            )
+        });
+        if up {
+            self.move_cursor(-1);
+        }
+        if down {
+            self.move_cursor(1);
+        }
+        if enter {
+            self.enter();
+        }
+        if back {
+            self.parent_dir();
+        }
+        if esc {
+            self.set_screen(Screen::Main);
+        }
+    }
 }
 
 impl eframe::App for App {
@@ -150,6 +328,7 @@ impl eframe::App for App {
 
 impl App {
     fn panel(&mut self, ui: &mut Ui) {
+        self.keyboard(ui);
         let area = ui.max_rect();
         let scale = (area.width() / W).min(area.height() / H);
         let p = Panel { origin: area.center() - vec2(W, H) * scale / 2.0, scale };
@@ -161,7 +340,14 @@ impl App {
 
         self.lcd(&painter, &p);
         for i in 0..6 {
-            key(ui, &p, p.rect(167.0 + i as f32 * 41.0, 212.0, 28.0, 14.0), &WHITE, &format!("F{}", i + 1));
+            let rect = p.rect(167.0 + i as f32 * 41.0, 212.0, 28.0, 14.0);
+            if key(ui, &p, rect, &WHITE, &format!("F{}", i + 1)).clicked() && matches!(self.screen, Screen::Load(_)) {
+                match i {
+                    0 => self.parent_dir(),
+                    5 => self.enter(),
+                    _ => {}
+                }
+            }
         }
 
         self.left_controls(ui, &painter, &p);
@@ -183,24 +369,63 @@ impl App {
             (true, false) => "PLAY",
             _ => "STOP",
         };
-        let pad = self.last_pad.map_or("---".to_owned(), |n| format!("{}{:02}", BANKS[self.bank], n + 1));
-        let lines = [
-            ("Sq:01-Sequence01".to_owned(), "Now:001.01.00".to_owned()),
-            (" J:120.0(SEQ)  Timing:1/16".to_owned(), "Tsig: 4/4".to_owned()),
-            ("Count:ON       Loop:ON".to_owned(), "Bars:  2".to_owned()),
-            ("Tr:01-(Unused) ON:YES".to_owned(), "Pgm:OFF".to_owned()),
-            (format!("Pad:{pad}        Bank:{}", BANKS[self.bank]), status.to_owned()),
-        ];
-        for (i, (left, right)) in lines.iter().enumerate() {
+        let pad = self.last_pad.unwrap_or(0);
+        let pad_line = format!(
+            "Pad:{}{:02} {}",
+            BANKS[self.bank],
+            pad + 1,
+            self.slot(pad).as_ref().map_or("(empty)", |s| &s.name).chars().take(16).collect::<String>()
+        );
+        // Each row is (left text, right text, highlighted).
+        let (rows, soft_keys) = match &self.screen {
+            Screen::Main => {
+                let note = if self.message.is_empty() { "Count:ON       Loop:ON" } else { &self.message };
+                let rows = vec![
+                    ("Sq:01-Sequence01".to_owned(), "Now:001.01.00".to_owned(), false),
+                    (" J:120.0(SEQ)  Timing:1/16".to_owned(), "Tsig: 4/4".to_owned(), false),
+                    (note.to_owned(), "Bars:  2".to_owned(), false),
+                    ("Tr:01-(Unused) ON:YES".to_owned(), format!("Vel:{:3}", (self.velocity * 127.0) as u8), false),
+                    (pad_line, status.to_owned(), false),
+                ];
+                (rows, MAIN_SOFT_KEYS)
+            }
+            Screen::Load(b) => {
+                let dir = b.dir.to_string_lossy();
+                let tail = dir.chars().rev().take(34).collect::<Vec<_>>().into_iter().rev().collect::<String>();
+                let mut rows = vec![(format!("LOAD {tail}"), String::new(), false)];
+                let start = b.cursor.saturating_sub(2);
+                for (i, entry) in b.entries.iter().enumerate().skip(start).take(3) {
+                    let name = entry.file_name().unwrap_or_default().to_string_lossy();
+                    let name = if entry.is_dir() { format!("{name}/") } else { name.into_owned() };
+                    rows.push((format!(" {name}"), String::new(), i == b.cursor));
+                }
+                if b.entries.is_empty() {
+                    rows.push((" (no folders or .wav files)".to_owned(), String::new(), false));
+                }
+                rows.resize(4, (String::new(), String::new(), false));
+                let hint = if self.message.is_empty() { "ENTER: load" } else { &self.message };
+                rows.push((pad_line, hint.to_owned(), false));
+                (rows, LOAD_SOFT_KEYS)
+            }
+        };
+        for (i, (left, right, highlight)) in rows.iter().enumerate() {
             let y = 73.0 + i as f32 * 10.0;
-            painter.text(p.pos(166.0, y), Align2::LEFT_TOP, left, p.mono(7.0), LCD_INK);
-            painter.text(p.pos(401.0, y), Align2::RIGHT_TOP, right, p.mono(7.0), LCD_INK);
+            let ink = if *highlight {
+                painter.rect_filled(p.rect(164.0, y - 0.5, 239.0, 9.5), 0.0, LCD_INK);
+                LCD_BG
+            } else {
+                LCD_INK
+            };
+            painter.text(p.pos(166.0, y), Align2::LEFT_TOP, left, p.mono(7.0), ink);
+            painter.text(p.pos(401.0, y), Align2::RIGHT_TOP, right, p.mono(7.0), ink);
         }
 
-        for (i, label) in SOFT_KEYS.iter().enumerate() {
+        for (i, label) in soft_keys.iter().enumerate() {
             let tab = p.rect(163.0 + i as f32 * 41.0, 126.0, 36.0, 9.0);
-            painter.rect_filled(tab, 0.0, LCD_INK);
-            painter.text(tab.center(), Align2::CENTER_CENTER, *label, p.mono(6.0), LCD_BG);
+            if !label.is_empty() {
+                painter.rect_filled(tab, 0.0, LCD_INK);
+                painter.text(tab.center(), Align2::CENTER_CENTER, *label, p.mono(6.0), LCD_BG);
+            }
             let legend = format!("F{}", i + 1);
             let at = p.pos(181.0 + i as f32 * 41.0, 163.0);
             painter.text(at, Align2::CENTER_CENTER, legend, p.prop(7.0), Color32::from_gray(0xc8));
@@ -214,29 +439,57 @@ impl App {
             let (x, y) =
                 if i == 9 { (141.0, 402.0) } else { (77.0 + (i % 3) as f32 * 64.0, 286.0 + (i / 3) as f32 * 36.0) };
             p.label(painter, x + 12.0, y - 7.0, num, 8.0);
-            key(ui, p, p.rect(x, y, 24.0, 10.0), &BLUE, "");
+            if key(ui, p, p.rect(x, y, 24.0, 10.0), &BLUE, "").clicked() && *mode == "LOAD" {
+                self.set_screen(Screen::Load(Browser::open(self.load_dir.clone())));
+            }
             p.label(painter, x + 12.0, y + 16.0, mode, 6.0);
         }
         painter.rect_filled(p.rect(66.0, 386.0, 40.0, 30.0), 2.0 * s, PANEL);
         p.label(painter, 86.0, 393.0, "SHIFT", 7.0);
         key(ui, p, p.rect(72.0, 401.0, 28.0, 12.0), &WHITE, "");
         p.label(painter, 217.0, 393.0, "ENTER", 7.0);
-        key(ui, p, p.rect(203.0, 401.0, 28.0, 12.0), &WHITE, "");
+        if key(ui, p, p.rect(203.0, 401.0, 28.0, 12.0), &WHITE, "").clicked() {
+            self.enter();
+        }
 
         p.label(painter, 304.0, 262.0, "MAIN SCREEN", 7.0);
-        key(ui, p, p.rect(288.0, 271.0, 32.0, 15.0), &WHITE, "");
+        if key(ui, p, p.rect(288.0, 271.0, 32.0, 15.0), &WHITE, "").clicked() {
+            self.set_screen(Screen::Main);
+        }
         p.label(painter, 398.0, 262.0, "OPEN WINDOW", 7.0);
         key(ui, p, p.rect(382.0, 271.0, 32.0, 15.0), &ORANGE, "");
 
         p.label(painter, 350.0, 304.0, "DATA", 9.0);
-        wheel(painter, p, p.pos(350.0, 378.0), 62.0);
+        let center = p.pos(350.0, 378.0);
+        let resp = ui.interact(
+            Rect::from_center_size(center, vec2(124.0, 124.0) * s),
+            ui.scope_id().with("data"),
+            Sense::drag(),
+        );
+        let scroll = if resp.hovered() { ui.input(|i| i.smooth_scroll_delta.y) } else { 0.0 };
+        // Dragging up or scrolling up turns the wheel clockwise, which moves the cursor down.
+        let turn = (-resp.drag_delta().y - scroll) / s;
+        self.wheel_angle += turn * 0.03;
+        self.wheel_drag += turn;
+        let steps = (self.wheel_drag / 12.0).trunc();
+        self.wheel_drag -= steps * 12.0;
+        self.move_cursor(steps as isize);
+        wheel(painter, p, center, 62.0, self.wheel_angle);
 
         p.label(painter, 350.0, 467.0, "CURSOR", 9.0);
         painter.rect_filled(p.rect(308.0, 476.0, 86.0, 66.0), 4.0 * s, BODY_EDGE);
-        key(ui, p, p.rect(331.0, 479.0, 40.0, 29.0), &WHITE, "︿");
-        key(ui, p, p.rect(331.0, 510.0, 40.0, 29.0), &WHITE, "﹀");
-        key(ui, p, p.rect(311.0, 479.0, 18.0, 60.0), &WHITE, "‹");
-        key(ui, p, p.rect(373.0, 479.0, 18.0, 60.0), &WHITE, "›");
+        if key(ui, p, p.rect(331.0, 479.0, 40.0, 29.0), &WHITE, "︿").clicked() {
+            self.move_cursor(-1);
+        }
+        if key(ui, p, p.rect(331.0, 510.0, 40.0, 29.0), &WHITE, "﹀").clicked() {
+            self.move_cursor(1);
+        }
+        if key(ui, p, p.rect(311.0, 479.0, 18.0, 60.0), &WHITE, "‹").clicked() {
+            self.parent_dir();
+        }
+        if key(ui, p, p.rect(373.0, 479.0, 18.0, 60.0), &WHITE, "›").clicked() {
+            self.enter();
+        }
         p.label(painter, 350.0, 551.0, "DIGIT", 6.0);
 
         painter.rect_stroke(p.rect(44.0, 430.0, 84.0, 244.0), 0.0, Stroke::new(s, INK), StrokeKind::Inside);
@@ -345,7 +598,21 @@ impl App {
         p.label(painter, 790.0, 135.0, "REC GAIN", 8.0);
         knob(painter, p, p.pos(790.0, 170.0), 20.0, Color32::from_rgb(0xe9, 0xa0, 0xa6), 0.35);
         p.label(painter, 885.0, 135.0, "MAIN VOLUME", 8.0);
-        knob(painter, p, p.pos(885.0, 170.0), 20.0, WHITE.face, 0.6);
+        let center = p.pos(885.0, 170.0);
+        let resp = ui.interact(
+            Rect::from_center_size(center, vec2(52.0, 52.0) * s),
+            ui.scope_id().with("volume"),
+            Sense::drag(),
+        );
+        let scroll = if resp.hovered() { ui.input(|i| i.smooth_scroll_delta.y) } else { 0.0 };
+        let delta = (-resp.drag_delta().y + scroll) / s / 120.0;
+        if delta != 0.0 {
+            self.volume = (self.volume + delta).clamp(0.0, 1.0);
+            if let Some(engine) = &self.engine {
+                engine.set_volume(self.volume);
+            }
+        }
+        knob(painter, p, center, 20.0, WHITE.face, self.volume);
         for x in [790.0, 885.0] {
             p.label(painter, x - 22.0, 197.0, "MIN", 5.5);
             p.label(painter, x + 22.0, 197.0, "MAX", 5.5);
@@ -371,11 +638,25 @@ impl App {
             painter.text(p.pos(x + 76.0, y - 7.0), Align2::RIGHT_CENTER, key.name(), p.prop(7.0), INK);
             let rect = p.rect(x, y, 76.0, 74.0);
             let resp = ui.interact(rect, ui.scope_id().with(("pad", n)), Sense::click());
-            let hit = resp.is_pointer_button_down_on() || ui.input(|i| i.key_down(*key));
-            if hit {
-                self.last_pad = Some(n);
+            let clicked = resp.is_pointer_button_down_on();
+            // Key events rather than key_down, so a tap that is pressed and released within one
+            // frame still triggers.
+            let tapped = ui.input(|i| {
+                i.events
+                    .iter()
+                    .any(|e| matches!(e, egui::Event::Key { key: k, pressed: true, repeat: false, .. } if k == key))
+            });
+            if clicked && !self.held[n] {
+                // With the mouse, hitting higher on the pad plays louder.
+                let velocity = resp
+                    .interact_pointer_pos()
+                    .map_or(KEY_VELOCITY, |pos| 1.0 - (pos.y - rect.top()) / rect.height() * 0.8);
+                self.hit_pad(n, velocity);
+            } else if tapped {
+                self.hit_pad(n, KEY_VELOCITY);
             }
-            pad(painter, p, rect, hit);
+            self.held[n] = clicked;
+            pad(painter, p, rect, clicked || tapped || ui.input(|i| i.key_down(*key)));
         }
     }
 }
@@ -431,19 +712,21 @@ fn knob(painter: &Painter, p: &Panel, center: Pos2, radius: f32, cap: Color32, v
         .line_segment([center + dir * radius * 0.2 * s, center + dir * radius * 0.7 * s], Stroke::new(2.0 * s, DARK));
 }
 
-fn wheel(painter: &Painter, p: &Panel, center: Pos2, radius: f32) {
+/// The DATA wheel, turned by `angle` radians.
+fn wheel(painter: &Painter, p: &Panel, center: Pos2, radius: f32, angle: f32) {
     let s = p.scale;
     painter.circle_filled(center + vec2(0.0, 3.0 * s), radius * s, SHADOW);
     painter.circle_filled(center, radius * s, DARK);
     for k in 0..16 {
-        let a = k as f32 * PI / 8.0;
+        let a = angle + k as f32 * PI / 8.0;
         let dir = vec2(a.cos(), a.sin());
         let stroke = Stroke::new(1.5 * s, Color32::from_gray(0x70));
         painter.line_segment([center + dir * (radius - 12.0) * s, center + dir * (radius - 5.0) * s], stroke);
     }
     painter.circle_filled(center, (radius - 18.0) * s, Color32::from_rgb(0x3b, 0x3c, 0x3f));
     painter.circle_stroke(center, (radius - 18.0) * s, Stroke::new(s, Color32::from_gray(0x55)));
-    let dimple = center + vec2(14.0, 18.0) * s;
+    let a = angle + 0.9;
+    let dimple = center + vec2(a.cos(), a.sin()) * 23.0 * s;
     painter.circle_filled(dimple, 9.0 * s, DARK);
     painter.circle_stroke(dimple, 9.0 * s, Stroke::new(s, Color32::from_gray(0x5a)));
 }
@@ -453,5 +736,5 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default().with_inner_size([1000.0, 730.0]).with_min_inner_size([650.0, 475.0]),
         ..Default::default()
     };
-    eframe::run_native("rsampler", options, Box::new(|_| Ok(Box::<App>::default())))
+    eframe::run_native("rsampler", options, Box::new(|_| Ok(Box::new(App::new()))))
 }

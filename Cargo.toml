@@ -10,4 +10,6 @@ keywords = ["sampler", "mpc", "gui", "audio", "music"]
 categories = ["multimedia::audio"]
 
 [dependencies]
+cpal = "0.18.2"
 eframe = "0.37.0"
+hound = "3.5.1"
