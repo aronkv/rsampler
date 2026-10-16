@@ -19,11 +19,15 @@ Linux first, Windows later.
 ## Install
 
 ```sh
-cargo install --path .
-rsampler
+curl -fsSL https://raw.githubusercontent.com/aronkv/rsampler/main/install.sh | sh
 ```
 
-Or run it straight from the source tree with `cargo run`.
+This builds rsampler from source, so it needs the [Rust toolchain](https://rustup.rs) and, on Linux,
+the ALSA development files (the script tells you the package name if they are missing). Then start it
+with `rsampler`.
+
+From a local checkout, `cargo install --path .` does the same, and `cargo run` runs it without
+installing.
 
 ## Usage
 
