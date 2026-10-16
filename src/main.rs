@@ -2,6 +2,7 @@ mod audio;
 mod lcd;
 mod panel;
 mod program;
+mod project;
 mod seq;
 
 use std::path::PathBuf;
@@ -85,6 +86,16 @@ struct App {
     levels_pad: usize,
     shift: bool,
     taps: Vec<Instant>,
+    /// Folder of the open project, once saved or loaded.
+    project: Option<PathBuf>,
+    save_name: String,
+    /// Typing the project name on the SAVE screen.
+    editing_name: bool,
+    /// The first key typed replaces the whole name, like a selected text field.
+    replace_name: bool,
+    /// A replace waiting for its second press of ENTER or DO IT.
+    confirm: Option<PathBuf>,
+    title_changed: bool,
 }
 
 /// Something the keyboard asked for this frame.
@@ -105,6 +116,7 @@ enum Action {
     Bar(i32),
     Start,
     Tap,
+    Save,
 }
 
 impl App {
@@ -139,6 +151,12 @@ impl App {
             levels_pad: 0,
             shift: false,
             taps: Vec::new(),
+            project: None,
+            save_name: "Project01".to_owned(),
+            editing_name: false,
+            replace_name: false,
+            confirm: None,
+            title_changed: false,
         }
     }
 
@@ -172,16 +190,26 @@ impl App {
     }
 
     fn set_screen(&mut self, screen: Screen) {
-        if let Screen::Load(b) = &self.screen {
+        if let Screen::Load(b) | Screen::Save(b) = &self.screen {
             self.load_dir = b.dir.clone();
         }
         self.screen = screen;
+        self.editing_name = false;
+        self.confirm = None;
         self.focus = 0;
         self.message.clear();
     }
 
     fn rows(&self, s: &Shared) -> Vec<Row> {
-        lcd::rows(&View { s, screen: &self.screen, pad: self.pad, velocity: self.velocity, message: &self.message })
+        lcd::rows(&View {
+            s,
+            screen: &self.screen,
+            pad: self.pad,
+            velocity: self.velocity,
+            message: &self.message,
+            name: &self.save_name,
+            editing: self.editing_name,
+        })
     }
 
     fn fields(&self) -> Vec<(usize, Field)> {
@@ -190,7 +218,8 @@ impl App {
 
     fn cursor(&mut self, dx: i32, dy: i32) {
         match &mut self.screen {
-            Screen::Load(b) => {
+            Screen::Load(b) | Screen::Save(b) => {
+                self.confirm = None;
                 if dy != 0 {
                     b.cursor = b.cursor.saturating_add_signed(dy as isize).min(b.entries.len().saturating_sub(1));
                 }
@@ -232,7 +261,7 @@ impl App {
         if steps == 0 {
             return;
         }
-        if let Screen::Load(_) = self.screen {
+        if let Screen::Load(_) | Screen::Save(_) = self.screen {
             return self.cursor(0, steps);
         }
         let fields = self.fields();
@@ -331,21 +360,31 @@ impl App {
     }
 
     fn parent_dir(&mut self) {
-        if let Screen::Load(b) = &mut self.screen
-            && let Some(parent) = b.dir.parent()
+        let wavs = matches!(self.screen, Screen::Load(_));
+        if let Screen::Load(b) | Screen::Save(b) = &mut self.screen
+            && let Some(parent) = b.dir.parent().map(PathBuf::from)
         {
-            let from = b.dir.clone();
-            *b = Browser::open(parent.to_owned());
+            let from = std::mem::replace(b, Browser::open(parent, wavs)).dir;
             b.cursor = b.entries.iter().position(|e| *e == from).unwrap_or(0);
         }
     }
 
-    /// ENTER: on the LOAD screen opens a folder, or loads a WAV into the selected pad.
+    /// ENTER: on the LOAD screen opens a folder, loads a project, or loads a WAV into the selected
+    /// pad; on the SAVE screen opens a folder or picks an existing project's name.
     fn enter(&mut self) {
-        let Screen::Load(b) = &mut self.screen else { return };
+        let saving = matches!(self.screen, Screen::Save(_));
+        let (Screen::Load(b) | Screen::Save(b)) = &mut self.screen else { return };
         let Some(path) = b.entries.get(b.cursor).cloned() else { return };
+        if project::is_project(&path) {
+            if saving {
+                self.save_name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            } else {
+                self.load_project(path);
+            }
+            return;
+        }
         if path.is_dir() {
-            *b = Browser::open(path);
+            *b = Browser::open(path, !saving);
             return;
         }
         let pad = self.pad;
@@ -364,6 +403,100 @@ impl App {
         }
     }
 
+    /// Loading replaces everything, so it takes a second ENTER to confirm.
+    fn load_project(&mut self, path: PathBuf) {
+        if self.confirm.as_ref() != Some(&path) {
+            self.say("Replaces everything. ENTER again to load");
+            self.confirm = Some(path);
+            return;
+        }
+        self.confirm = None;
+        match self.with(|s| project::load(s, &path)) {
+            Ok(()) => {
+                self.save_name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                self.project = Some(path);
+                self.title_changed = true;
+                (self.pad, self.bank, self.focus) = (0, 0, 0);
+                self.set_screen(Screen::Main);
+                self.say(format!("Loaded {}", self.save_name));
+            }
+            Err(e) => self.say(e),
+        }
+    }
+
+    /// Ctrl+S: saves over the open project, or opens the SAVE screen for a new one.
+    fn quick_save(&mut self) {
+        match self.project.clone() {
+            Some(root) => {
+                let dir = root.parent().map(PathBuf::from).unwrap_or_default();
+                let result = self.with(|s| project::save(s, &dir, &self.save_name));
+                match result {
+                    Ok(_) => self.say(format!("Saved {}", self.save_name)),
+                    Err(e) => self.say(e),
+                }
+            }
+            None => self.open_save(),
+        }
+    }
+
+    fn open_save(&mut self) {
+        let dir =
+            self.project.as_ref().and_then(|p| p.parent()).map(PathBuf::from).unwrap_or_else(|| self.load_dir.clone());
+        self.set_screen(Screen::Save(Browser::open(dir, false)));
+    }
+
+    /// DO IT on the SAVE screen. Overwriting an existing project asks for a second press.
+    fn save_here(&mut self) {
+        let Screen::Save(b) = &self.screen else { return };
+        let name = self.save_name.trim().to_owned();
+        if name.is_empty() {
+            return self.say("Type a name first (NAME)");
+        }
+        let dir = b.dir.clone();
+        let target = dir.join(&name);
+        if project::is_project(&target) && self.confirm.as_ref() != Some(&target) {
+            self.say("Exists. DO IT again to replace");
+            self.confirm = Some(target);
+            return;
+        }
+        self.confirm = None;
+        let result = self.with(|s| project::save(s, &dir, &name));
+        match result {
+            Ok(root) => {
+                self.project = Some(root);
+                self.save_name = name;
+                self.title_changed = true;
+                let Screen::Save(b) = &mut self.screen else { return };
+                *b = Browser::open(dir, false);
+                self.say(format!("Saved {}", self.save_name));
+            }
+            Err(e) => self.say(e),
+        }
+    }
+
+    /// Typing the project name: letters go to the name instead of the pads.
+    fn type_name(&mut self, events: &[egui::Event]) {
+        for e in events {
+            match e {
+                egui::Event::Text(text) => {
+                    if std::mem::take(&mut self.replace_name) {
+                        self.save_name.clear();
+                    }
+                    let allowed = text.chars().filter(|c| c.is_alphanumeric() || " -_.()".contains(*c));
+                    self.save_name.extend(allowed);
+                    self.save_name
+                        .truncate(self.save_name.char_indices().nth(40).map_or(self.save_name.len(), |(i, _)| i));
+                }
+                egui::Event::Key { key: Key::Backspace, pressed: true, .. } => {
+                    self.replace_name = false;
+                    self.save_name.pop();
+                }
+                egui::Event::Key { key: Key::Enter | Key::Escape, pressed: true, .. } => self.editing_name = false,
+                _ => {}
+            }
+        }
+    }
+
     fn soft_key(&mut self, i: usize) {
         let pad = self.pad;
         match (&self.screen, i) {
@@ -378,8 +511,11 @@ impl App {
             }
             (Screen::Main, 4) => self.with(|s| s.t.track = s.t.track.saturating_sub(1)),
             (Screen::Main, 5) => self.with(|s| s.t.track = (s.t.track + 1).min(seq::TRACKS - 1)),
-            (Screen::Load(_), 0) => self.parent_dir(),
+            (Screen::Load(_) | Screen::Save(_), 0) => self.parent_dir(),
+            (Screen::Load(_), 1) => self.open_save(),
             (Screen::Load(_), 5) => self.enter(),
+            (Screen::Save(_), 4) => (self.editing_name, self.replace_name) = (true, true),
+            (Screen::Save(_), 5) => self.save_here(),
             (Screen::Program, 0) => self.mode("LOAD"),
             (Screen::Program, 1) => self.mode("TRIM"),
             (Screen::Program, 2) => self.mode("MIXER"),
@@ -419,7 +555,9 @@ impl App {
 
     fn mode(&mut self, name: &str) {
         match name {
-            "LOAD" => self.set_screen(Screen::Load(Browser::open(self.load_dir.clone()))),
+            // SHIFT + LOAD is SAVE.
+            "LOAD" if self.shift => self.open_save(),
+            "LOAD" => self.set_screen(Screen::Load(Browser::open(self.load_dir.clone(), true))),
             "TRIM" => self.set_screen(Screen::Trim),
             "PROGRAM" => self.set_screen(Screen::Program),
             "MIXER" => self.set_screen(Screen::Mixer),
@@ -484,11 +622,16 @@ impl App {
             Action::Bar(d) => self.locate_bar(d),
             Action::Start => self.with(|s| s.locate(0)),
             Action::Tap => self.tap_tempo(),
+            Action::Save => self.quick_save(),
         }
     }
 
     fn keyboard(&mut self, ui: &Ui) {
         let (events, focused, erase) = ui.input(|i| (i.events.clone(), i.focused, i.key_down(Key::Delete)));
+        self.shift = ui.input(|i| i.modifiers.shift);
+        if self.editing_name {
+            return self.type_name(&events);
+        }
         let mut actions = Vec::new();
         for e in events {
             let egui::Event::Key { key, physical_key, pressed, repeat, modifiers } = e else { continue };
@@ -512,6 +655,7 @@ impl App {
                 Key::R if modifiers.ctrl => Action::Rec(RecMode::Rec),
                 Key::O if modifiers.ctrl => Action::Rec(RecMode::Overdub),
                 Key::Z if modifiers.ctrl => Action::Undo,
+                Key::S if modifiers.ctrl => Action::Save,
                 Key::Num3 if command => Action::Mode("LOAD"),
                 Key::Num5 if command => Action::Mode("TRIM"),
                 Key::Num6 if command => Action::Mode("PROGRAM"),
@@ -549,7 +693,6 @@ impl App {
                 }
             }
         }
-        self.shift = ui.input(|i| i.modifiers.shift);
         for a in actions {
             self.run(a);
         }
@@ -563,6 +706,9 @@ impl eframe::App for App {
             self.message.clear();
         }
         self.keyboard(ui);
+        if std::mem::take(&mut self.title_changed) {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(format!("rsampler - {}", self.save_name)));
+        }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(BACKDROP)).show(ui, |ui| self.panel(ui));
         // Keep the LCD position and LEDs moving while the sequencer runs.
         if self.with(|s| s.t.playing) || !self.message.is_empty() {
@@ -610,7 +756,7 @@ impl App {
         let st = audio::lock(&shared);
         let rows = self.rows(&st);
         let fields = lcd::fields(&rows);
-        let focus = (!matches!(self.screen, Screen::Load(_)) && !fields.is_empty())
+        let focus = (!matches!(self.screen, Screen::Load(_) | Screen::Save(_)) && !fields.is_empty())
             .then(|| fields[self.focus.min(fields.len() - 1)].1);
         let font = p.mono(7.5);
         let mut clicked = None;
@@ -741,7 +887,8 @@ impl App {
         }
         p.label(painter, 217.0, 393.0, "ENTER", 7.0);
         if key(ui, p, p.rect(203.0, 401.0, 28.0, 12.0), &WHITE, "", false).clicked() {
-            self.enter();
+            // SHIFT + ENTER is SAVE, as printed under the key.
+            if self.shift { self.open_save() } else { self.enter() }
         }
 
         p.label(painter, 304.0, 262.0, "MAIN SCREEN", 7.0);

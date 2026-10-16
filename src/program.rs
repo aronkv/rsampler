@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
 pub const PADS: usize = 64;
 
 /// Stereo frames at the output sample rate.
@@ -24,7 +26,7 @@ impl Sound {
 }
 
 /// What happens when a pad is hit while its previous hit still sounds.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Overlap {
     /// Hits layer.
     Poly,

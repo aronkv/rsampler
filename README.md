@@ -2,8 +2,8 @@
 
 A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.
 
-> **Status:** early development. Pads, programs, mixer, trimming and a 99-sequence, 64-track sequencer
-> work. Projects cannot be saved yet, and song mode, step editing, sampling and MIDI are still missing.
+> **Status:** early development. Pads, programs, mixer, trimming, a 99-sequence, 64-track sequencer
+> and saving projects work. Song mode, step editing, sampling and MIDI are still missing.
 
 ## Goals
 
@@ -141,6 +141,23 @@ The blue **5 / TRIM** key shows the selected pad's waveform. `St` and `End` set 
 
 WAV files of any bit depth and sample rate work, mono or stereo.
 
+### Saving and loading projects
+
+A project is a folder holding `rsampler.json` (sequences, pad settings, mixer) and the pad sounds as
+WAV files in `sounds/`, so the sounds can be used anywhere else too.
+
+To save, press `Ctrl+S`, **SHIFT + ENTER** or **SAVE** (F2) on the LOAD screen:
+
+1. Pick the folder to save in, like on the LOAD screen.
+2. Press **NAME** (F5), type the name and press `Enter`. Choosing an existing project in the list
+   takes its name.
+3. Press **DO IT** (F6). Replacing an existing project asks for a second **DO IT**.
+
+Once a project has been saved or loaded, `Ctrl+S` saves over it straight away.
+
+To load, choose the project (marked `PROJECT`) on the LOAD screen and press `Enter` twice; loading
+replaces everything that is open.
+
 ### Keyboard shortcuts
 
 | Key                         | Does                         |
@@ -149,6 +166,7 @@ WAV files of any bit depth and sample rate work, mono or stereo.
 | `Shift+Space`               | PLAY START                   |
 | `Ctrl+R` / `Ctrl+O`         | REC / OVERDUB                |
 | `Ctrl+Z`                    | UNDO SEQ                     |
+| `Ctrl+S`                    | Save                         |
 | `Delete` (hold)             | ERASE                        |
 | `T`                         | TAP TEMPO                    |
 | `,` / `.`                   | STEP < / >                   |
@@ -160,9 +178,8 @@ WAV files of any bit depth and sample rate work, mono or stereo.
 
 ### Not there yet
 
-Saving and loading projects, song mode, step editing, sampling from an input, NOTE VARIATION,
-MIDI, and the remaining modes (SONG, MISC, SAMPLE, SETUP, OTHER). Everything you load or record is
-gone when the app closes.
+Song mode, step editing, sampling from an input, NOTE VARIATION, MIDI, and the remaining modes
+(SONG, MISC, SAMPLE, SETUP, OTHER). Closing the app does not ask about unsaved changes yet.
 
 ## Reference
 

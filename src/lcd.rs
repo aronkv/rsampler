@@ -7,7 +7,7 @@ use crate::audio::{RecMode, Shared};
 use crate::program::pad_name;
 use crate::seq::TIMING;
 
-/// LOAD screen: a directory listing of subfolders and WAV files.
+/// LOAD and SAVE screens: a directory listing of subfolders, and WAV files when loading.
 pub struct Browser {
     pub dir: PathBuf,
     pub entries: Vec<PathBuf>,
@@ -15,14 +15,14 @@ pub struct Browser {
 }
 
 impl Browser {
-    pub fn open(dir: PathBuf) -> Self {
+    pub fn open(dir: PathBuf, wavs: bool) -> Self {
         let visible = |p: &Path| !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'));
         let mut entries: Vec<PathBuf> = fs::read_dir(&dir)
             .into_iter()
             .flatten()
             .flatten()
             .map(|e| e.path())
-            .filter(|p| visible(p) && (p.is_dir() || is_wav(p)))
+            .filter(|p| visible(p) && (p.is_dir() || (wavs && is_wav(p))))
             .collect();
         entries.sort_by_key(|p| (!p.is_dir(), p.file_name().map(|n| n.to_string_lossy().to_lowercase())));
         Self { dir, entries, cursor: 0 }
@@ -36,6 +36,7 @@ fn is_wav(path: &Path) -> bool {
 pub enum Screen {
     Main,
     Load(Browser),
+    Save(Browser),
     Program,
     Mixer,
     Trim,
@@ -45,7 +46,8 @@ impl Screen {
     pub fn soft_keys(&self) -> [&'static str; 6] {
         match self {
             Screen::Main => ["T/C", "UNDO", "TR.ON", "SOLO", "TR -", "TR +"],
-            Screen::Load(_) => ["UP DIR", "", "", "", "", "DO IT"],
+            Screen::Load(_) => ["UP DIR", "SAVE", "", "", "", "DO IT"],
+            Screen::Save(_) => ["UP DIR", "", "", "", "NAME", "DO IT"],
             Screen::Program => ["LOAD", "TRIM", "MIXER", "", "", "CLEAR"],
             Screen::Mixer => ["", "", "", "", "", "RESET"],
             Screen::Trim => ["PLAY", "", "", "", "", "RESET"],
@@ -141,6 +143,9 @@ pub struct View<'a> {
     pub pad: usize,
     pub velocity: u8,
     pub message: &'a str,
+    /// Project name on the SAVE screen, and whether it is being typed.
+    pub name: &'a str,
+    pub editing: bool,
 }
 
 fn status(s: &Shared) -> &'static str {
@@ -317,22 +322,40 @@ pub fn rows(v: &View) -> Vec<Row> {
                 ),
             ]
         }
-        Screen::Load(b) => {
+        Screen::Load(b) | Screen::Save(b) => {
+            let saving = matches!(v.screen, Screen::Save(_));
             let dir = b.dir.to_string_lossy();
-            let tail: String = dir.chars().rev().take(60).collect::<Vec<_>>().into_iter().rev().collect();
-            let mut rows = vec![row(vec![t(format!("LOAD {tail}"))], vec![])];
-            let start = b.cursor.saturating_sub(2);
-            for (i, entry) in b.entries.iter().enumerate().skip(start).take(4) {
+            let tail: String = dir.chars().rev().take(58).collect::<Vec<_>>().into_iter().rev().collect();
+            let mut rows = vec![row(vec![t(format!("{} {tail}", if saving { "SAVE" } else { "LOAD" }))], vec![])];
+            let start = b.cursor.saturating_sub(1);
+            for (i, entry) in b.entries.iter().enumerate().skip(start).take(3) {
                 let name = entry.file_name().unwrap_or_default().to_string_lossy();
-                let name = if entry.is_dir() { format!("{name}/") } else { name.into_owned() };
-                rows.push(Row { left: vec![t(format!(" {name}"))], right: vec![], inverted: i == b.cursor });
+                let (name, kind) = if crate::project::is_project(entry) {
+                    (name.into_owned(), "PROJECT")
+                } else if entry.is_dir() {
+                    (format!("{name}/"), "")
+                } else {
+                    (name.into_owned(), "")
+                };
+                rows.push(Row { left: vec![t(format!(" {name}"))], right: vec![t(kind)], inverted: i == b.cursor });
             }
             if b.entries.is_empty() {
-                rows.push(row(vec![t(" (no folders or .wav files)")], vec![]));
+                rows.push(row(vec![t(if saving { " (no folders)" } else { " (no folders or .wav files)" })], vec![]));
             }
-            rows.resize_with(5, Row::default);
-            let hint = if v.message.is_empty() { "ENTER: load" } else { v.message };
-            rows.push(row(vec![t(format!("To pad:{} {}", pad_name(v.pad), sound_name(v)))], vec![t(hint)]));
+            rows.resize_with(4, Row::default);
+            if saving {
+                let cursor = if v.editing { "_" } else { "" };
+                rows.push(row(
+                    vec![t("Name:"), t(format!("{}{cursor}", v.name))],
+                    vec![t(if v.editing { "ENTER: done" } else { "NAME: type" })],
+                ));
+                let hint = if v.message.is_empty() { "DO IT: save here" } else { v.message };
+                rows.push(row(vec![t(hint)], vec![]));
+            } else {
+                rows.push(row(vec![t(format!("To pad:{} {}", pad_name(v.pad), sound_name(v)))], vec![]));
+                let hint = if v.message.is_empty() { "ENTER: load" } else { v.message };
+                rows.push(row(vec![t(hint)], vec![]));
+            }
             rows
         }
     }

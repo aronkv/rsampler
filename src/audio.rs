@@ -692,8 +692,8 @@ pub fn builtin_kit(rate: u32) -> [Sound; 4] {
 
 /// Engine state without an audio device, for tests.
 #[cfg(test)]
-fn offline(rate: u32) -> (Shared, Voices) {
-    (Shared::new(rate), Voices::new(rate))
+pub fn offline_shared(rate: u32) -> Shared {
+    Shared::new(rate)
 }
 
 #[cfg(test)]
@@ -714,7 +714,7 @@ mod tests {
     }
 
     fn with_kit(rate: u32) -> (Shared, Voices) {
-        let (mut s, v) = offline(rate);
+        let (mut s, v) = (offline_shared(rate), Voices::new(rate));
         for (pad, sound) in builtin_kit(rate).into_iter().enumerate() {
             s.pads[pad].sound = Some(sound);
         }
