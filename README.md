@@ -2,8 +2,9 @@
 
 A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.
 
-> **Status:** early development. Pads, programs, mixer, trimming, a 99-sequence, 64-track sequencer
-> song mode, step editing, sampling, MIDI input and saving projects work.
+> **Status:** early development, but usable: pads, programs, mixer, trimming, a 99-sequence,
+> 64-track sequencer, song mode, step editing, sampling from the input, MIDI input and project
+> saving all work. See [Not there yet](#not-there-yet) for what is missing.
 
 ## Goals
 
@@ -11,6 +12,7 @@ A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.
 - 16 velocity pads, four banks (A–D)
 - Programs: sample assignment per pad, tuning, envelopes, mixer
 - Sequencer: tracks, tempo, quantize, loop, step editing
+- Sampling, song mode, MIDI in and out
 - Loading and saving the original file formats (`.SND`, `.PGM`, `.APS`, `.SEQ`/`.MID`, `.ALL`)
 
 ## Platforms
@@ -34,6 +36,11 @@ From a local checkout, `cargo install --path .` does the same, and `cargo run` r
 installing.
 
 ## Usage
+
+[Pads](#pads) · [NOTE VARIATION](#note-variation) · [Recording](#recording-a-sequence) ·
+[SONG](#song) · [STEP EDIT](#step-edit) · [PROGRAM](#program-how-each-pad-plays) · [MIXER](#mixer) ·
+[TRIM](#trim) · [Loading samples](#loading-samples) · [SAMPLE](#sample-recording-from-the-input) ·
+[Projects](#saving-and-loading-projects) · [MIDI](#midi) · [Shortcuts](#keyboard-shortcuts)
 
 rsampler works like the MPC2000XL: the LCD shows one screen at a time, the **CURSOR** keys move
 between its fields, and the **DATA** wheel changes the highlighted field. The six keys under the LCD
@@ -216,6 +223,9 @@ Once a project has been saved or loaded, `Ctrl+S` saves over it straight away.
 To load, choose the project (marked `PROJECT`) on the LOAD screen and press `Enter` twice; loading
 replaces everything that is open.
 
+Closing the window with unsaved changes shows a warning on the LCD instead; close it again to quit
+without saving.
+
 ### MIDI
 
 rsampler listens to every MIDI input it finds, including controllers plugged in while it runs, and
@@ -244,10 +254,10 @@ Most 16-pad controllers send 36–51 by default, which lands on bank A.
 
 ### Not there yet
 
-MIDI output and clock sync, and the remaining modes (MISC, SETUP, OTHER).
-
-Closing the window with unsaved changes shows a warning on the LCD instead; close it again to quit
-without saving.
+- MIDI output and MIDI clock sync
+- The MISC, SETUP and OTHER modes
+- Loading the MPC's own file formats
+- Windows builds
 
 ## Reference
 
