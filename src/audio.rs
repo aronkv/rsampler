@@ -453,7 +453,7 @@ impl Engine {
                 for frame in out.chunks_mut(channels) {
                     s.advance(&mut voices);
                     let [l, r] = voices.render();
-                    let (l, r) = ((l * s.master).clamp(-1.0, 1.0), (r * s.master).clamp(-1.0, 1.0));
+                    let (l, r) = (soft_clip(l * s.master), soft_clip(r * s.master));
                     for (i, x) in frame.iter_mut().enumerate() {
                         *x = if i % 2 == 0 { l } else { r };
                     }
@@ -463,6 +463,14 @@ impl Engine {
             None,
         )
     }
+}
+
+/// Linear up to −2 dBFS, then bends smoothly towards full scale instead of clipping hard when
+/// many pads hit at once.
+fn soft_clip(x: f32) -> f32 {
+    const KNEE: f32 = 0.8;
+    let a = x.abs();
+    if a <= KNEE { x } else { x.signum() * (KNEE + (1.0 - KNEE) * ((a - KNEE) / (1.0 - KNEE)).tanh()) }
 }
 
 pub fn lock(shared: &Mutex<Shared>) -> MutexGuard<'_, Shared> {
@@ -790,6 +798,20 @@ mod tests {
             s.pads[pad].sound = Some(sound);
         }
         (s, v)
+    }
+
+    #[test]
+    fn soft_clip_is_transparent_below_the_knee_and_never_clips() {
+        assert_eq!(soft_clip(0.5), 0.5);
+        assert_eq!(soft_clip(-0.8), -0.8);
+        assert!(soft_clip(1.0) < 1.0 && soft_clip(1.0) > 0.95);
+        assert!(soft_clip(100.0) <= 1.0 && soft_clip(-100.0) >= -1.0);
+        let mut last = 0.0;
+        for i in 0..400 {
+            let y = soft_clip(i as f32 / 100.0);
+            assert!(y >= last);
+            last = y;
+        }
     }
 
     #[test]
