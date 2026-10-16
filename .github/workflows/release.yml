@@ -3,26 +3,58 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Builds without publishing, to check the release build.
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  linux-x86_64:
-    # Oldest supported runner, so the binary runs on distros with an older glibc.
-    runs-on: ubuntu-22.04
+  build:
+    strategy:
+      matrix:
+        include:
+          # Oldest supported runner, so the binary runs on distros with an older glibc.
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --locked
       - run: cargo build --release --locked
-      - name: Package
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
         run: |
-          asset=rsampler-x86_64-unknown-linux-gnu.tar.gz
+          asset=rsampler-${{ matrix.target }}.tar.gz
           tar -czf "$asset" -C target/release rsampler
           sha256sum "$asset" > "$asset.sha256"
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $asset = "rsampler-${{ matrix.target }}.zip"
+          Compress-Archive -Path target/release/rsampler.exe -DestinationPath $asset
+          $hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLower()
+          "$hash  $asset" | Out-File -Encoding ascii -NoNewline "$asset.sha256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: rsampler-${{ matrix.target }}.*
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes rsampler-*.tar.gz*
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes rsampler-*
