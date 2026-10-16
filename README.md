@@ -34,4 +34,4 @@ endorsed by or sponsored by inMusic.
 
 ## License
 
-MIT
+Apache License 2.0, see [LICENSE](LICENSE).
