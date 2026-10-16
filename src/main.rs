@@ -1,5 +1,6 @@
 mod audio;
 mod lcd;
+mod midi;
 mod panel;
 mod program;
 mod project;
@@ -118,6 +119,8 @@ struct App {
     /// REC GAIN knob, 0..1 for −12..+12 dB.
     rec_gain: f32,
     samples_taken: u32,
+    midi: midi::Midi,
+    midi_scanned: Instant,
 }
 
 /// Something the keyboard asked for this frame.
@@ -154,6 +157,7 @@ impl App {
         let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         let music = home.join("Music");
         let saved = project::fingerprint(&audio::lock(&engine.shared));
+        let midi = midi::Midi::start(engine.shared.clone());
         Self {
             engine,
             screen: Screen::Main,
@@ -193,6 +197,9 @@ impl App {
             sample_time: 4,
             rec_gain: 0.5,
             samples_taken: 0,
+            midi,
+            // Scan for MIDI inputs on the first frame.
+            midi_scanned: Instant::now() - Duration::from_secs(60),
         }
     }
 
@@ -1018,6 +1025,15 @@ impl eframe::App for App {
         }
         self.keyboard(ui);
         self.guard_close(ui);
+        // Picks up MIDI controllers plugged in while running.
+        if self.midi_scanned.elapsed() > Duration::from_secs(2) {
+            self.midi_scanned = Instant::now();
+            let added = self.midi.scan();
+            if !added.is_empty() {
+                self.say(format!("MIDI in: {}", added.join(", ")));
+            }
+            ui.ctx().request_repaint_after(Duration::from_secs(2));
+        }
         if std::mem::take(&mut self.title_changed) {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(format!("rsampler - {}", self.save_name)));
         }

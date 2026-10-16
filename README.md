@@ -3,7 +3,7 @@
 A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.
 
 > **Status:** early development. Pads, programs, mixer, trimming, a 99-sequence, 64-track sequencer
-> song mode, step editing, sampling and saving projects work. MIDI is still missing.
+> song mode, step editing, sampling, MIDI input and saving projects work.
 
 ## Goals
 
@@ -216,6 +216,13 @@ Once a project has been saved or loaded, `Ctrl+S` saves over it straight away.
 To load, choose the project (marked `PROJECT`) on the LOAD screen and press `Enter` twice; loading
 replaces everything that is open.
 
+### MIDI
+
+rsampler listens to every MIDI input it finds, including controllers plugged in while it runs, and
+on Linux it also offers its own `rsampler` input port for other programs. Notes 36–99 (C1–D#6)
+play pads A01–D16 with their velocity, whatever bank is selected, and are recorded like pad hits.
+Most 16-pad controllers send 36–51 by default, which lands on bank A.
+
 ### Keyboard shortcuts
 
 | Key                         | Does                         |
@@ -237,7 +244,7 @@ replaces everything that is open.
 
 ### Not there yet
 
-MIDI, and the remaining modes (MISC, SETUP, OTHER).
+MIDI output and clock sync, and the remaining modes (MISC, SETUP, OTHER).
 
 Closing the window with unsaved changes shows a warning on the LCD instead; close it again to quit
 without saving.

@@ -13,6 +13,7 @@ use crate::seq::{Note, SEQUENCES, Sequence, TIMING, quantize};
 
 const MAX_VOICES: usize = 64;
 
+#[derive(Debug, PartialEq)]
 pub enum Hit {
     Press { pad: u8, velocity: u8, var: Variation },
     Release { pad: u8 },
