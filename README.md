@@ -22,9 +22,12 @@ Linux first, Windows later.
 curl -fsSL https://raw.githubusercontent.com/aronkv/rsampler/main/install.sh | sh
 ```
 
-This builds rsampler from source, so it needs the [Rust toolchain](https://rustup.rs) and, on Linux,
-the ALSA development files (the script tells you the package name if they are missing). Then start it
-with `rsampler`.
+On Linux x86_64 this downloads the latest prebuilt release (checksum-verified) into `~/.local/bin`;
+set `RSAMPLER_INSTALL_DIR` to put it elsewhere. On other systems it builds from source, which needs the
+[Rust toolchain](https://rustup.rs) and, on Linux, the ALSA development files (the script tells you
+the package name if they are missing). Then start it with `rsampler`.
+
+Prebuilt binaries are also on the [releases page](https://github.com/aronkv/rsampler/releases).
 
 From a local checkout, `cargo install --path .` does the same, and `cargo run` runs it without
 installing.
