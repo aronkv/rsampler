@@ -183,6 +183,7 @@ struct App {
     /// Last error or confirmation, shown on the LCD until the screen changes.
     message: String,
     held: [bool; 16],
+    key_held: [bool; 16],
     wheel_drag: f32,
     wheel_angle: f32,
     volume: f32,
@@ -217,6 +218,7 @@ impl App {
             load_dir: if music.is_dir() { music } else { home },
             message,
             held: [false; 16],
+            key_held: [false; 16],
             wheel_drag: 0.0,
             wheel_angle: 0.0,
             volume: 0.8,
@@ -632,20 +634,30 @@ impl App {
     fn pads(&mut self, ui: &mut Ui, painter: &Painter, p: &Panel) {
         painter.rect_filled(p.rect(545.0, 272.0, 430.0, 400.0), 3.0 * p.scale, PANEL);
         p.section(painter, 575.0, 945.0, 284.0, "DRUMS");
+
+        // Pads follow physical key positions, so the bottom-left key is pad 1 on QWERTZ and
+        // AZERTY too. Events rather than key_down, so a tap released within one frame still counts.
+        let mut tapped = [false; 16];
+        ui.input(|i| {
+            for e in &i.events {
+                if let egui::Event::Key { key, physical_key, pressed, repeat, .. } = e
+                    && let Some(n) = PAD_KEYS.iter().position(|k| *k == physical_key.unwrap_or(*key))
+                {
+                    tapped[n] |= *pressed && !*repeat;
+                    self.key_held[n] = *pressed;
+                }
+            }
+        });
+
         for (n, key) in PAD_KEYS.iter().enumerate() {
             let (x, y) = (583.0 + (n % 4) as f32 * 92.0, 302.0 + (3 - n / 4) as f32 * 92.0);
             painter.text(p.pos(x, y - 7.0), Align2::LEFT_CENTER, format!("PAD {}", n + 1), p.prop(7.0), INK);
-            painter.text(p.pos(x + 76.0, y - 7.0), Align2::RIGHT_CENTER, key.name(), p.prop(7.0), INK);
+            let legend = if *key == Key::Z { "Z/Y" } else { key.name() };
+            painter.text(p.pos(x + 76.0, y - 7.0), Align2::RIGHT_CENTER, legend, p.prop(7.0), INK);
             let rect = p.rect(x, y, 76.0, 74.0);
             let resp = ui.interact(rect, ui.scope_id().with(("pad", n)), Sense::click());
             let clicked = resp.is_pointer_button_down_on();
-            // Key events rather than key_down, so a tap that is pressed and released within one
-            // frame still triggers.
-            let tapped = ui.input(|i| {
-                i.events
-                    .iter()
-                    .any(|e| matches!(e, egui::Event::Key { key: k, pressed: true, repeat: false, .. } if k == key))
-            });
+            let tapped = tapped[n];
             if clicked && !self.held[n] {
                 // With the mouse, hitting higher on the pad plays louder.
                 let velocity = resp
@@ -656,7 +668,7 @@ impl App {
                 self.hit_pad(n, KEY_VELOCITY);
             }
             self.held[n] = clicked;
-            pad(painter, p, rect, clicked || tapped || ui.input(|i| i.key_down(*key)));
+            pad(painter, p, rect, clicked || tapped || self.key_held[n]);
         }
     }
 }
