@@ -106,7 +106,7 @@ impl eframe::App for App {
 impl App {
     fn panel(&mut self, ui: &mut Ui) {
         let area = ui.max_rect();
-        let scale = (area.width() / W).min(area.height() / H);
+        let scale = (area.width() / (W + 32.0)).min(area.height() / (H + 32.0));
         let p = Panel { origin: area.center() - vec2(W, H) * scale / 2.0, scale };
         let s = scale;
 
@@ -188,13 +188,15 @@ impl App {
         };
         let pad = self.last_pad.map_or("---".to_owned(), |n| format!("{}{:02}", BANKS[self.bank], n + 1));
         let lines = [
-            format!("Sq:01-Sequence01        {status:>4}"),
-            "Tr:01-Track-01        BPM:120.0".to_owned(),
-            format!("Pad:{pad} (empty)       Bank:{}", BANKS[self.bank]),
-            "Now:001.01.00          Loop:ON".to_owned(),
+            ("Sq:01-Sequence01".to_owned(), status.to_owned()),
+            ("Tr:01-Track-01".to_owned(), "BPM:120.0".to_owned()),
+            (format!("Pad:{pad} (empty)"), format!("Bank:{}", BANKS[self.bank])),
+            ("Now:001.01.00".to_owned(), "Loop:ON".to_owned()),
         ];
-        for (i, line) in lines.iter().enumerate() {
-            painter.text(p.pos(66.0, 96.0 + i as f32 * 21.0), Align2::LEFT_TOP, line, p.font(14.0), LCD_INK);
+        for (i, (left, right)) in lines.iter().enumerate() {
+            let y = 96.0 + i as f32 * 21.0;
+            painter.text(p.pos(66.0, y), Align2::LEFT_TOP, left, p.font(14.0), LCD_INK);
+            painter.text(p.pos(514.0, y), Align2::RIGHT_TOP, right, p.font(14.0), LCD_INK);
         }
 
         for (i, label) in SOFT_KEYS.iter().enumerate() {
@@ -218,14 +220,13 @@ fn button(ui: &mut Ui, p: &Panel, rect: Rect, label: &str, style: &ButtonStyle, 
     painter.rect_filled(face, 5.0 * s, if down { style.pressed } else { style.face });
     painter.rect_stroke(face, 5.0 * s, Stroke::new(s, style.edge), StrokeKind::Inside);
 
-    let mut text_at = face.center();
+    let text_at = face.center();
     if let Some(on) = led {
         let c = pos2(face.left() + 10.0 * s, face.top() + 9.0 * s);
         if on {
             painter.circle_filled(c, 7.0 * s, LED_ON.gamma_multiply(0.25));
         }
         painter.circle_filled(c, 3.5 * s, if on { LED_ON } else { LED_OFF });
-        text_at.y += 3.0 * s;
     }
     painter.text(text_at, Align2::CENTER_CENTER, label, p.font(11.0), style.text);
     resp
