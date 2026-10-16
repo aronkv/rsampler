@@ -45,6 +45,10 @@ pub struct Transport {
     /// ERASE held: pads hit now delete their notes on the current track as the playhead passes.
     pub erase: bool,
     erasing: [bool; PADS],
+    /// NOTE REPEAT held: held pads play again on every Timing grid line.
+    pub repeat: bool,
+    /// Pads held down, with the velocity and variation they were hit with.
+    held: [Option<(u8, Variation)>; PADS],
     /// Notes recorded this pass, with the unquantized press position while the pad is still
     /// held; merged into the track when the loop wraps or playback stops, so recording in REC
     /// mode cannot erase them.
@@ -95,6 +99,8 @@ impl Shared {
                 click: false,
                 erase: false,
                 erasing: [false; PADS],
+                repeat: false,
+                held: [None; PADS],
                 pending: Vec::new(),
                 note_offs: Vec::new(),
                 undo: None,
@@ -271,6 +277,19 @@ impl Shared {
         }
 
         let len = self.seqs[seqi].len();
+        // NOTE REPEAT plays the held pads on the grid; with Timing OFF it uses 1/16.
+        let grid = if self.grid() > 1 { self.grid() } else { 24 };
+        if self.t.repeat && tick.is_multiple_of(grid) {
+            for pad in 0..PADS {
+                if let Some((velocity, var)) = self.t.held[pad] {
+                    voices.trigger(&self.pads, pad as u8, velocity, var);
+                    if recording {
+                        let note = Note { tick, pad: pad as u8, velocity, duration: grid / 2, var };
+                        self.t.pending.push((note, None));
+                    }
+                }
+            }
+        }
         for (ti, t) in self.seqs[seqi].tracks.iter().enumerate() {
             if !t.on || self.t.solo.is_some_and(|s| s != ti) {
                 continue;
@@ -350,6 +369,7 @@ impl Shared {
     fn handle_hit(&mut self, hit: Hit, voices: &mut Voices) {
         match hit {
             Hit::Press { pad, velocity, var } => {
+                self.t.held[pad as usize] = Some((velocity, var));
                 if self.t.erase && self.t.playing {
                     self.t.erasing[pad as usize] = true;
                     return;
@@ -362,6 +382,7 @@ impl Shared {
                 }
             }
             Hit::Release { pad } => {
+                self.t.held[pad as usize] = None;
                 self.t.erasing[pad as usize] = false;
                 voices.release(pad);
                 let len = self.seq().len();
@@ -846,6 +867,25 @@ mod tests {
         run(&mut s, &mut v, bar);
         assert!(!s.t.playing);
         assert_eq!(s.t.song, None);
+    }
+
+    #[test]
+    fn note_repeat_records_on_the_grid_while_held() {
+        let (mut s, mut v) = with_kit(48_000);
+        s.t.count_in = false;
+        s.toggle_rec(RecMode::Overdub);
+        s.play(true);
+        s.t.repeat = true;
+        run(&mut s, &mut v, 250 * 10);
+        s.hits.push(Hit::Press { pad: 1, velocity: 90, var: None });
+        // Held from tick 10 to 100: the 1/16 lines 24, 48, 72 and 96 repeat it.
+        run(&mut s, &mut v, 250 * 90);
+        s.hits.push(Hit::Release { pad: 1 });
+        run(&mut s, &mut v, 250 * 40);
+        s.stop();
+        let ticks: Vec<u32> = s.seq().tracks[0].notes.iter().map(|n| n.tick).collect();
+        // The first hit itself is quantized to 0.
+        assert_eq!(ticks, [0, 24, 48, 72, 96]);
     }
 
     #[test]

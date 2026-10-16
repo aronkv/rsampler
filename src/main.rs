@@ -919,13 +919,18 @@ impl App {
             Action::Step(d) => self.locate_step(d),
             Action::Bar(d) => self.locate_bar(d),
             Action::Start => self.with(|s| s.locate(0)),
-            Action::Tap => self.tap_tempo(),
+            Action::Tap => {
+                if !self.with(|s| s.t.playing) {
+                    self.tap_tempo();
+                }
+            }
             Action::Save => self.quick_save(),
         }
     }
 
     fn keyboard(&mut self, ui: &Ui) {
-        let (events, focused, erase) = ui.input(|i| (i.events.clone(), i.focused, i.key_down(Key::Delete)));
+        let (events, focused, erase, repeat) =
+            ui.input(|i| (i.events.clone(), i.focused, i.key_down(Key::Delete), i.key_down(Key::T)));
         self.shift = ui.input(|i| i.modifiers.shift);
         if self.editing_name {
             return self.type_name(&events);
@@ -998,7 +1003,11 @@ impl App {
         for a in actions {
             self.run(a);
         }
-        self.with(|s| s.t.erase = erase);
+        self.with(|s| {
+            s.t.erase = erase;
+            // While playing, holding T is NOTE REPEAT; while stopped it taps the tempo.
+            s.t.repeat = repeat && s.t.playing;
+        });
     }
 }
 
@@ -1307,7 +1316,11 @@ impl App {
 
         p.label(painter, 205.0, 436.0, "TAP TEMPO", 7.0);
         p.label(painter, 205.0, 445.0, "NOTE REPEAT", 7.0);
-        if key(ui, p, p.rect(185.0, 454.0, 40.0, 30.0), &WHITE, "", false).clicked() {
+        let playing = self.with(|s| s.t.playing);
+        let tap = key(ui, p, p.rect(185.0, 454.0, 40.0, 30.0), &WHITE, "", false);
+        if playing && tap.is_pointer_button_down_on() {
+            self.with(|s| s.t.repeat = true);
+        } else if !playing && tap.clicked() {
             self.tap_tempo();
         }
 

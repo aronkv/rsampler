@@ -118,6 +118,10 @@ Hold **ERASE** (or `Delete`) while playing and hold pads to delete their notes a
 passes. **TR.ON** (F3) and **TRACK MUTE** mute the track, **SOLO** (F4) plays only this track,
 **TR -** / **TR +** (F5/F6) change track and **NEXT SEQ** queues the next sequence.
 
+**NOTE REPEAT**: while playing, hold **TAP TEMPO / NOTE REPEAT** (or `T`) and hold pads; they play
+again on every `Timing` grid line (1/16 when `Timing` is OFF) and are recorded when recording.
+While stopped the same key taps the tempo.
+
 **LOCATE**: **STEP <** / **>** move by the `Timing` grid, **BAR <<** / **>>** by a bar, and
 **GO TO** returns to the start. **STOP** pressed while stopped also returns to the start.
 
@@ -223,7 +227,7 @@ replaces everything that is open.
 | `Ctrl+S`                    | Save                         |
 | `+` / `-`                   | DATA wheel                   |
 | `Delete` (hold)             | ERASE                        |
-| `T`                         | TAP TEMPO                    |
+| `T`                         | TAP TEMPO (stopped), NOTE REPEAT (held while playing) |
 | `,` / `.`                   | STEP < / >                   |
 | `Page Up` / `Page Down`     | BAR << / >>                  |
 | `Home`                      | GO TO start                  |
