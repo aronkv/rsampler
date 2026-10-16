@@ -45,9 +45,10 @@ pub struct Transport {
     /// ERASE held: pads hit now delete their notes on the current track as the playhead passes.
     pub erase: bool,
     erasing: [bool; PADS],
-    /// Notes recorded this pass; merged into the track when the loop wraps or playback stops,
-    /// so recording in REC mode cannot erase them.
-    pending: Vec<(Note, bool)>,
+    /// Notes recorded this pass, with the unquantized press position while the pad is still
+    /// held; merged into the track when the loop wraps or playback stops, so recording in REC
+    /// mode cannot erase them.
+    pending: Vec<(Note, Option<u32>)>,
     /// Pads playing NOTE OFF notes from the sequence, and the tick to release them.
     note_offs: Vec<(u8, u32)>,
     pub undo: Option<(usize, Sequence)>,
@@ -197,9 +198,9 @@ impl Shared {
         let (seq, track) = (self.t.seq, self.t.track);
         let now = self.now();
         let len = self.seqs[seq].len();
-        for (mut note, open) in self.t.pending.drain(..) {
-            if open {
-                note.duration = (now + len - note.tick) % len;
+        for (mut note, held_from) in self.t.pending.drain(..) {
+            if let Some(from) = held_from {
+                note.duration = (now + len - from) % len;
             }
             note.duration = note.duration.max(1);
             self.seqs[seq].tracks[track].insert(note);
@@ -306,9 +307,9 @@ impl Shared {
                 }
                 voices.trigger(&self.pads, pad, velocity);
                 if self.t.playing && self.t.rec != RecMode::Off && self.t.tick >= 0.0 {
-                    let len = self.seq().len();
-                    let tick = quantize(self.now(), self.grid(), self.t.swing, len);
-                    self.t.pending.push((Note { tick, pad, velocity, duration: 0 }, true));
+                    let (now, len) = (self.now(), self.seq().len());
+                    let tick = quantize(now, self.grid(), self.t.swing, len);
+                    self.t.pending.push((Note { tick, pad, velocity, duration: 0 }, Some(now)));
                 }
             }
             Hit::Release { pad } => {
@@ -316,10 +317,9 @@ impl Shared {
                 voices.release(pad);
                 let len = self.seq().len();
                 let now = self.now();
-                for (note, open) in self.t.pending.iter_mut().filter(|(n, open)| *open && n.pad == pad) {
-                    // Quantizing may have moved the start past the release; keep it short then.
-                    note.duration = ((now + len - note.tick) % len).clamp(1, len / 2);
-                    *open = false;
+                // The duration is how long the pad was held, wherever quantizing moved the start.
+                for (note, held_from) in self.t.pending.iter_mut().filter(|(n, h)| h.is_some() && n.pad == pad) {
+                    note.duration = ((now + len - held_from.take().unwrap_or(now)) % len).max(1);
                 }
             }
         }
@@ -767,9 +767,8 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].tick, 24);
         assert_eq!(notes[0].velocity, 100);
-        // Pressed at tick 26 and released at 36: the note-off stays put, so the duration runs
-        // from the quantized start.
-        assert!((11..=13).contains(&notes[0].duration), "duration {}", notes[0].duration);
+        // Held from tick 26 to 36.
+        assert!((9..=11).contains(&notes[0].duration), "duration {}", notes[0].duration);
 
         // Playing it back sounds at tick 24 and not before.
         let (mut s2, mut v2) = with_kit(rate);
@@ -777,6 +776,23 @@ mod tests {
         s2.play(true);
         assert_eq!(run(&mut s2, &mut v2, 250 * 23), 0.0);
         assert!(run(&mut s2, &mut v2, 250 * 4) > 0.1);
+    }
+
+    #[test]
+    fn quick_tap_before_the_grid_line_stays_short() {
+        let (mut s, mut v) = with_kit(48_000);
+        s.t.count_in = false;
+        s.toggle_rec(RecMode::Overdub);
+        s.play(true);
+        // Tap at tick 20, released at 22: quantized to 24, which is after the release.
+        run(&mut s, &mut v, 250 * 20 + 1);
+        s.hits.push(Hit::Press { pad: 0, velocity: 100 });
+        run(&mut s, &mut v, 250 * 2);
+        s.hits.push(Hit::Release { pad: 0 });
+        run(&mut s, &mut v, 1);
+        s.stop();
+        let n = s.seq().tracks[0].notes[0];
+        assert_eq!((n.tick, n.duration), (24, 2));
     }
 
     #[test]
