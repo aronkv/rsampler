@@ -1,0 +1,359 @@
+//! What the LCD shows on each screen, as rows of text segments; some segments are editable fields.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use crate::audio::{RecMode, Shared};
+use crate::program::pad_name;
+use crate::seq::TIMING;
+
+/// LOAD screen: a directory listing of subfolders and WAV files.
+pub struct Browser {
+    pub dir: PathBuf,
+    pub entries: Vec<PathBuf>,
+    pub cursor: usize,
+}
+
+impl Browser {
+    pub fn open(dir: PathBuf) -> Self {
+        let visible = |p: &Path| !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'));
+        let mut entries: Vec<PathBuf> = fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| visible(p) && (p.is_dir() || is_wav(p)))
+            .collect();
+        entries.sort_by_key(|p| (!p.is_dir(), p.file_name().map(|n| n.to_string_lossy().to_lowercase())));
+        Self { dir, entries, cursor: 0 }
+    }
+}
+
+fn is_wav(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav"))
+}
+
+pub enum Screen {
+    Main,
+    Load(Browser),
+    Program,
+    Mixer,
+    Trim,
+}
+
+impl Screen {
+    pub fn soft_keys(&self) -> [&'static str; 6] {
+        match self {
+            Screen::Main => ["T/C", "UNDO", "TR.ON", "SOLO", "TR -", "TR +"],
+            Screen::Load(_) => ["UP DIR", "", "", "", "", "DO IT"],
+            Screen::Program => ["LOAD", "TRIM", "MIXER", "", "", "CLEAR"],
+            Screen::Mixer => ["", "", "", "", "", "RESET"],
+            Screen::Trim => ["PLAY", "", "", "", "", "RESET"],
+        }
+    }
+
+    /// Mixer and TRIM draw graphics below their first rows.
+    pub fn text_rows(&self) -> usize {
+        match self {
+            Screen::Mixer | Screen::Trim => 2,
+            _ => 6,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Field {
+    Seq,
+    Tempo,
+    Timing,
+    Swing,
+    Count,
+    Click,
+    Loop,
+    Bars,
+    Beats,
+    BeatUnit,
+    Track,
+    TrackOn,
+    Now,
+    Pad,
+    Tune,
+    Attack,
+    Decay,
+    DecayMode,
+    Cutoff,
+    Reso,
+    Overlap,
+    Mute1,
+    Mute2,
+    Level,
+    Pan,
+    Start,
+    End,
+}
+
+pub struct Seg {
+    pub text: String,
+    pub field: Option<Field>,
+}
+
+fn t(text: impl Into<String>) -> Seg {
+    Seg { text: text.into(), field: None }
+}
+
+fn f(field: Field, text: impl Into<String>) -> Seg {
+    Seg { text: text.into(), field: Some(field) }
+}
+
+/// A line of the LCD: segments flush left and segments flush right, and whether it is
+/// highlighted (the LOAD cursor).
+#[derive(Default)]
+pub struct Row {
+    pub left: Vec<Seg>,
+    pub right: Vec<Seg>,
+    pub inverted: bool,
+}
+
+fn row(left: Vec<Seg>, right: Vec<Seg>) -> Row {
+    Row { left, right, inverted: false }
+}
+
+fn on_off(on: bool) -> &'static str {
+    if on { "ON" } else { "OFF" }
+}
+
+pub fn pan_text(pan: i32) -> String {
+    match pan {
+        0 => "MID".to_owned(),
+        p if p < 0 => format!("L{}", -p),
+        p => format!("R{p}"),
+    }
+}
+
+fn mute_text(m: Option<u8>) -> String {
+    m.map_or("---".to_owned(), |p| pad_name(p as usize))
+}
+
+pub struct View<'a> {
+    pub s: &'a Shared,
+    pub screen: &'a Screen,
+    /// Selected program pad, 0..64.
+    pub pad: usize,
+    pub velocity: u8,
+    pub message: &'a str,
+}
+
+fn status(s: &Shared) -> &'static str {
+    match (s.t.playing, s.t.rec) {
+        (true, _) if s.t.tick < 0.0 => "COUNT IN",
+        (true, RecMode::Rec) => "REC",
+        (true, RecMode::Overdub) => "OVERDUB",
+        (true, RecMode::Off) => "PLAY",
+        (false, RecMode::Rec) => "REC READY",
+        (false, RecMode::Overdub) => "ODUB READY",
+        (false, RecMode::Off) => "STOP",
+    }
+}
+
+fn sound_name(v: &View) -> String {
+    v.s.pads[v.pad].sound.as_ref().map_or("(no sound)".to_owned(), |s| s.name.chars().take(20).collect())
+}
+
+pub fn rows(v: &View) -> Vec<Row> {
+    let s = v.s;
+    let msg = |rows: &mut Vec<Row>| {
+        rows.resize_with(5, Row::default);
+        rows.push(row(vec![t(v.message)], vec![t(status(s))]));
+    };
+    match v.screen {
+        Screen::Main => {
+            let seq = s.seq();
+            let tr = s.t.track;
+            let track = &seq.tracks[tr];
+            let swing = TIMING[s.t.timing].1;
+            let mut rows = vec![
+                row(
+                    vec![f(Field::Seq, format!("Sq:{:02}", s.t.seq + 1)), t(format!("-Sequence{:02}", s.t.seq + 1))],
+                    vec![t("Now:"), f(Field::Now, seq.bbt(s.now()))],
+                ),
+                row(
+                    vec![
+                        t("Tempo:"),
+                        f(Field::Tempo, format!("{:5.1}", seq.tempo)),
+                        t("  Timing:"),
+                        f(Field::Timing, TIMING[s.t.timing].0),
+                        t("  Swing:"),
+                        f(
+                            Field::Swing,
+                            if swing == 48 || swing == 24 { format!("{}%", s.t.swing) } else { "--".into() },
+                        ),
+                    ],
+                    vec![
+                        t("Tsig:"),
+                        f(Field::Beats, seq.beats.to_string()),
+                        t("/"),
+                        f(Field::BeatUnit, seq.beat_unit.to_string()),
+                    ],
+                ),
+                row(
+                    vec![
+                        t("Count:"),
+                        f(Field::Count, on_off(s.t.count_in)),
+                        t("  Click:"),
+                        f(Field::Click, on_off(s.t.click)),
+                        t("  Loop:"),
+                        f(Field::Loop, on_off(seq.looping)),
+                    ],
+                    vec![t("Bars:"), f(Field::Bars, seq.bars.to_string())],
+                ),
+                row(
+                    vec![
+                        t("Tr:"),
+                        f(Field::Track, format!("{:02}", tr + 1)),
+                        t(format!("-Track-{:02}", tr + 1)),
+                        t("  On:"),
+                        f(Field::TrackOn, if track.on { "YES" } else { "NO" }),
+                        t(if s.t.solo == Some(tr) { "  SOLO" } else { "" }),
+                    ],
+                    vec![t(if track.notes.is_empty() { "(Unused)" } else { "(Used)" })],
+                ),
+                row(
+                    vec![t(format!("Pad:{} {}", pad_name(v.pad), sound_name(v)))],
+                    vec![t(format!("Vel:{:3}", v.velocity))],
+                ),
+            ];
+            if let Some(next) = s.t.next_seq {
+                rows.push(row(vec![t(v.message)], vec![t(format!("Next:{:02}  {}", next + 1, status(s)))]));
+            } else {
+                msg(&mut rows);
+            }
+            rows
+        }
+        Screen::Program => {
+            let p = &s.pads[v.pad];
+            let mut rows = vec![
+                row(
+                    vec![t("PROGRAM  Pad:"), f(Field::Pad, pad_name(v.pad)), t(format!("  {}", sound_name(v)))],
+                    vec![],
+                ),
+                row(
+                    vec![
+                        t("Tune:"),
+                        f(Field::Tune, format!("{:+.1}", p.tune as f32 / 10.0)),
+                        t("  Attack:"),
+                        f(Field::Attack, format!("{:3}", p.attack)),
+                        t("  Decay:"),
+                        f(Field::Decay, format!("{:3}", p.decay)),
+                    ],
+                    vec![t("Dcy md:"), f(Field::DecayMode, if p.decay_from_start { "START" } else { "END" })],
+                ),
+                row(
+                    vec![
+                        t("Filter:"),
+                        f(Field::Cutoff, format!("{:3}", p.cutoff)),
+                        t("  Reso:"),
+                        f(Field::Reso, format!("{:3}", p.resonance)),
+                    ],
+                    vec![],
+                ),
+                row(
+                    vec![
+                        t("Overlap:"),
+                        f(Field::Overlap, p.overlap.label()),
+                        t("  Mutes:"),
+                        f(Field::Mute1, mute_text(p.mutes[0])),
+                        t(" "),
+                        f(Field::Mute2, mute_text(p.mutes[1])),
+                    ],
+                    vec![],
+                ),
+                row(
+                    vec![
+                        t("Level:"),
+                        f(Field::Level, format!("{:3}", p.level)),
+                        t("  Pan:"),
+                        f(Field::Pan, pan_text(p.pan)),
+                    ],
+                    vec![],
+                ),
+            ];
+            msg(&mut rows);
+            rows
+        }
+        Screen::Mixer => {
+            let p = &s.pads[v.pad];
+            vec![
+                row(
+                    vec![t(format!("MIXER  Bank:{}", ["A", "B", "C", "D"][v.pad / 16]))],
+                    vec![t(format!("{} {}", pad_name(v.pad), sound_name(v)))],
+                ),
+                row(
+                    vec![
+                        t("Level:"),
+                        f(Field::Level, format!("{:3}", p.level)),
+                        t("  Pan:"),
+                        f(Field::Pan, pan_text(p.pan)),
+                    ],
+                    vec![t(v.message)],
+                ),
+            ]
+        }
+        Screen::Trim => {
+            let secs = |frames: usize| format!("{:.3}s", frames as f32 / s.rate as f32);
+            let (st, end, len) =
+                s.pads[v.pad].sound.as_ref().map_or((0, 0, 0), |snd| (snd.start, snd.end, snd.frames.len()));
+            vec![
+                row(
+                    vec![t("TRIM  Pad:"), f(Field::Pad, pad_name(v.pad)), t(format!("  {}", sound_name(v)))],
+                    vec![t(format!("Len:{}", secs(len)))],
+                ),
+                row(
+                    vec![t("St:"), f(Field::Start, secs(st)), t("  End:"), f(Field::End, secs(end))],
+                    vec![t(if v.message.is_empty() {
+                        format!("Play:{}", secs(end.saturating_sub(st)))
+                    } else {
+                        v.message.to_owned()
+                    })],
+                ),
+            ]
+        }
+        Screen::Load(b) => {
+            let dir = b.dir.to_string_lossy();
+            let tail: String = dir.chars().rev().take(60).collect::<Vec<_>>().into_iter().rev().collect();
+            let mut rows = vec![row(vec![t(format!("LOAD {tail}"))], vec![])];
+            let start = b.cursor.saturating_sub(2);
+            for (i, entry) in b.entries.iter().enumerate().skip(start).take(4) {
+                let name = entry.file_name().unwrap_or_default().to_string_lossy();
+                let name = if entry.is_dir() { format!("{name}/") } else { name.into_owned() };
+                rows.push(Row { left: vec![t(format!(" {name}"))], right: vec![], inverted: i == b.cursor });
+            }
+            if b.entries.is_empty() {
+                rows.push(row(vec![t(" (no folders or .wav files)")], vec![]));
+            }
+            rows.resize_with(5, Row::default);
+            let hint = if v.message.is_empty() { "ENTER: load" } else { v.message };
+            rows.push(row(vec![t(format!("To pad:{} {}", pad_name(v.pad), sound_name(v)))], vec![t(hint)]));
+            rows
+        }
+    }
+}
+
+/// Editable fields of a screen in cursor order.
+pub fn fields(rows: &[Row]) -> Vec<(usize, Field)> {
+    rows.iter()
+        .enumerate()
+        .flat_map(|(i, r)| r.left.iter().chain(&r.right).filter_map(move |s| s.field.map(|f| (i, f))))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pan_labels() {
+        assert_eq!(pan_text(0), "MID");
+        assert_eq!(pan_text(-50), "L50");
+        assert_eq!(pan_text(12), "R12");
+    }
+}

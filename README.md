@@ -2,7 +2,8 @@
 
 A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.
 
-> **Status:** early development. Pads, sample playback and WAV loading work; the sequencer does not exist yet.
+> **Status:** early development. Pads, programs, mixer, trimming and a 99-sequence, 64-track sequencer
+> work. Projects cannot be saved yet, and song mode, step editing, sampling and MIDI are still missing.
 
 ## Goals
 
@@ -34,6 +35,14 @@ installing.
 
 ## Usage
 
+rsampler works like the MPC2000XL: the LCD shows one screen at a time, the **CURSOR** keys move
+between its fields, and the **DATA** wheel changes the highlighted field. The six keys under the LCD
+(**F1–F6**) do what the labels above them say.
+
+- **Cursor**: arrow keys or the **CURSOR** buttons. You can also click a field on the LCD.
+- **DATA wheel**: drag or scroll over the wheel, scroll over the LCD, or press `+` / `-`. Hold
+  **Shift** for fine steps (0.1 BPM tempo, 0.1 semitone tuning, single-frame trimming).
+
 ### Pads
 
 Click a pad or hit its key. On the mouse, hitting higher on a pad plays louder; keys always play at
@@ -49,27 +58,111 @@ German) and AZERTY keyboards:
 |        | 5–8   | `A` `S` `D` `F` | `A` `S` `D` `F`    |
 | bottom | 1–4   | `Z` `X` `C` `V` | `Y` `X` `C` `V`    |
 
-**PAD BANK A–D** switches between four banks of 16 pads. Bank A starts with a built-in kick, snare,
-hi-hat and clap on pads 1–4.
+**PAD BANK A–D** switches between four banks of 16 pads (A01–D16). Bank A starts with a built-in
+kick, snare, hi-hat and clap on pads 1–4. The last pad you hit is the selected pad that the
+PROGRAM, MIXER, TRIM and LOAD screens work on.
+
+**16 LEVELS** spreads the selected pad's sound over all 16 pads, from velocity 7 on pad 1 to 127 on
+pad 16. Press it again to go back.
+
+### Recording a sequence
+
+The MAIN screen (**MAIN SCREEN** or **Esc**) shows the sequencer:
+
+| Field         | What it does                                                         |
+| ------------- | -------------------------------------------------------------------- |
+| `Sq`          | Sequence 1–99. Chosen while playing, it starts when the current one ends |
+| `Now`         | Position as bar.beat.tick (96 ticks per quarter note)                |
+| `Tempo`       | 30–300 BPM. **TAP TEMPO** (or `T`) sets it from your taps            |
+| `Timing`      | Quantize grid for recording: OFF, 1/8, 1/16, 1/32 and their triplets |
+| `Swing`       | 50–75 %, for 1/8 and 1/16                                            |
+| `Tsig`        | Time signature                                                       |
+| `Count`       | One bar of count-in before recording                                 |
+| `Click`       | Metronome while playing and recording                                |
+| `Loop`        | Loop the sequence                                                    |
+| `Bars`        | Sequence length                                                      |
+| `Tr`, `On`    | Track 1–64 and whether it plays                                      |
+
+To record:
+
+1. Press **REC** (replace) or **OVERDUB** (add). Its light shows it is armed.
+2. Press **PLAY** or **PLAY START**. After the count-in, play the pads.
+3. Press **STOP**.
+
+**REC** erases what is on the track as the playhead passes, and turns into **OVERDUB** after the
+first loop so the new take is kept. Pressing **REC** or **OVERDUB** while playing punches in or out.
+Notes are quantized to `Timing` as they are recorded; **T/C** (F1, or **OPEN WINDOW** on the
+`Timing` field) quantizes a whole track afterwards.
+
+**UNDO SEQ** (F2, `Ctrl+Z`) takes back the last recording or edit; its light shows that it can.
+Hold **ERASE** (or `Delete`) while playing and hold pads to delete their notes as the playhead
+passes. **TR.ON** (F3) and **TRACK MUTE** mute the track, **SOLO** (F4) plays only this track,
+**TR -** / **TR +** (F5/F6) change track and **NEXT SEQ** queues the next sequence.
+
+**LOCATE**: **STEP <** / **>** move by the `Timing` grid, **BAR <<** / **>>** by a bar, and
+**GO TO** returns to the start. **STOP** pressed while stopped also returns to the start.
+
+### PROGRAM: how each pad plays
+
+Open it with the blue **6 / PROGRAM** key. Hit a pad (or change `Pad`) to choose it.
+
+| Field     | What it does                                                               |
+| --------- | -------------------------------------------------------------------------- |
+| `Tune`    | ±12 semitones, in 0.1 steps                                                 |
+| `Attack`  | Fade-in time, 0 = instant                                                  |
+| `Decay`   | 100 lets the sound play out; lower values shorten it                        |
+| `Dcy md`  | END fades out towards the end of the sound, START decays right after the attack |
+| `Filter`  | Low-pass cutoff, 100 = open                                                |
+| `Reso`    | Filter resonance                                                           |
+| `Overlap` | POLY layers repeated hits, MONO cuts the previous hit, NOTE OFF stops when the pad is released |
+| `Mutes`   | Up to two pads this pad cuts off, e.g. a closed hi-hat stopping an open one |
+| `Level`, `Pan` | Same as in the mixer                                                  |
+
+**CLEAR** (F6) removes the pad's sound.
+
+### MIXER
+
+The blue **8 / MIXER** key shows the 16 pads of the current bank as level faders with pan markers.
+**←** / **→** choose the pad, **↑** selects `Level` and **↓** selects `Pan`, and the DATA wheel sets
+the value. **RESET** (F6) returns the pad to full level, centre.
+
+### TRIM
+
+The blue **5 / TRIM** key shows the selected pad's waveform. `St` and `End` set the part that plays.
+**PLAY** (F1) auditions it, **RESET** (F6) restores the whole sound.
 
 ### Loading samples
 
 1. Hit the pad you want to load into.
 2. Press **LOAD** (the blue `3` key). The browser opens in `~/Music`.
-3. Move with the arrow keys, the **DATA** wheel (scroll or drag) or the **CURSOR** buttons.
+3. Move with the arrow keys or the **DATA** wheel.
 4. **Enter**, **→**, **ENTER** or **F6** opens a folder, or loads the WAV file into the pad and plays it.
 5. **Backspace**, **←** or **F1** goes up a folder.
-6. **Esc** or **MAIN SCREEN** goes back to the main screen.
 
-WAV files of any bit depth and sample rate work; stereo files are mixed down to mono.
+WAV files of any bit depth and sample rate work, mono or stereo.
 
-### Other controls
+### Keyboard shortcuts
 
-- **MAIN VOLUME**: drag up/down or scroll over the knob.
-- **REC**, **OVERDUB**, **PLAY**, **STOP**: only toggle their lights for now, the sequencer is not
-  implemented yet.
+| Key                         | Does                         |
+| --------------------------- | ---------------------------- |
+| `Space`                     | PLAY / STOP                  |
+| `Shift+Space`               | PLAY START                   |
+| `Ctrl+R` / `Ctrl+O`         | REC / OVERDUB                |
+| `Ctrl+Z`                    | UNDO SEQ                     |
+| `Delete` (hold)             | ERASE                        |
+| `T`                         | TAP TEMPO                    |
+| `,` / `.`                   | STEP < / >                   |
+| `Page Up` / `Page Down`     | BAR << / >>                  |
+| `Home`                      | GO TO start                  |
+| `F1`–`F6`                   | Soft keys                    |
+| `Ctrl+3` / `5` / `6` / `8`  | LOAD / TRIM / PROGRAM / MIXER |
+| `Esc`                       | MAIN SCREEN                  |
 
-Loaded samples are not saved yet; they are gone when the app closes.
+### Not there yet
+
+Saving and loading projects, song mode, step editing, sampling from an input, NOTE VARIATION,
+MIDI, and the remaining modes (SONG, MISC, SAMPLE, SETUP, OTHER). Everything you load or record is
+gone when the app closes.
 
 ## Reference
 
