@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::audio::{Shared, load_wav};
-use crate::program::{Overlap, PADS, Pad, Sound, VarParam, pad_name};
+use crate::audio::{Shared, Song, load_wav};
+use crate::program::{Frames, Overlap, PADS, Pad, Sound, VarParam, pad_name};
 use crate::seq::{Note, SEQUENCES, Sequence, TIMING, TRACKS};
 
 pub const FILE: &str = "rsampler.json";
@@ -204,8 +204,26 @@ fn sound_file(pad: usize) -> String {
     format!("sounds/{}.wav", pad_name(pad))
 }
 
+/// Everything a save writes, taken while holding the engine lock; the slow file writing then
+/// happens without it, so the audio keeps playing.
+pub struct Snapshot {
+    file: ProjectFile,
+    sounds: Vec<(String, Frames)>,
+    rate: u32,
+}
+
+pub fn snapshot(s: &Shared) -> Snapshot {
+    let sounds = s
+        .pads
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| p.sound.as_ref().map(|snd| (sound_file(i), snd.frames.clone())))
+        .collect();
+    Snapshot { file: describe(s), sounds, rate: s.rate }
+}
+
 /// Writes the project into `dir/name`, replacing an earlier save there.
-pub fn save(s: &Shared, dir: &Path, name: &str) -> Result<PathBuf, String> {
+pub fn save(snap: &Snapshot, dir: &Path, name: &str) -> Result<PathBuf, String> {
     let root = dir.join(name);
     let sounds = root.join("sounds");
     if root.exists() && !is_project(&root) {
@@ -216,13 +234,10 @@ pub fn save(s: &Shared, dir: &Path, name: &str) -> Result<PathBuf, String> {
         fs::remove_dir_all(&sounds).map_err(|e| e.to_string())?;
     }
     fs::create_dir_all(&sounds).map_err(|e| e.to_string())?;
-    for (i, p) in s.pads.iter().enumerate() {
-        if let Some(snd) = &p.sound {
-            let file = sound_file(i);
-            write_wav(&root.join(&file), snd, s.rate).map_err(|e| format!("{file}: {e}"))?;
-        }
+    for (file, frames) in &snap.sounds {
+        write_wav(&root.join(file), frames, snap.rate).map_err(|e| format!("{file}: {e}"))?;
     }
-    let json = serde_json::to_string_pretty(&describe(s)).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(&snap.file).map_err(|e| e.to_string())?;
     // Write next to the target and rename, so a failed write never leaves a half-written JSON file.
     let tmp = root.join(format!("{FILE}.tmp"));
     fs::write(&tmp, json).map_err(|e| e.to_string())?;
@@ -241,21 +256,29 @@ pub fn fingerprint(s: &Shared) -> u64 {
     h.finish()
 }
 
-/// Replaces the current project with the one in `root`.
-pub fn load(s: &mut Shared, root: &Path) -> Result<(), String> {
+/// A project read from disk, ready to replace the open one.
+pub struct Loaded {
+    pads: Vec<Pad>,
+    seqs: Vec<Sequence>,
+    song: Song,
+    file: ProjectFile,
+}
+
+/// Reads the project in `root`, resampling its sounds to `rate`. Nothing is replaced yet, so a
+/// broken project leaves the open one untouched.
+pub fn load(root: &Path, rate: u32) -> Result<Loaded, String> {
     let json = fs::read_to_string(root.join(FILE)).map_err(|e| e.to_string())?;
-    let file: ProjectFile = serde_json::from_str(&json).map_err(|e| format!("{FILE}: {e}"))?;
+    let mut file: ProjectFile = serde_json::from_str(&json).map_err(|e| format!("{FILE}: {e}"))?;
     if file.version > VERSION {
         return Err("Made by a newer rsampler".to_owned());
     }
 
-    // Build everything first, so a broken project leaves the current one untouched.
     let mut pads: Vec<Pad> = (0..PADS).map(|_| Pad::default()).collect();
-    for p in file.pads {
+    for p in std::mem::take(&mut file.pads) {
         let Some(slot) = pads.get_mut(p.pad) else { continue };
         let sound = match p.sound {
             Some(snd) => {
-                let frames = load_wav(&root.join(&snd.file), s.rate).map_err(|e| format!("{}: {e}", snd.file))?;
+                let frames = load_wav(&root.join(&snd.file), rate).map_err(|e| format!("{}: {e}", snd.file))?;
                 // The output may run at another sample rate than when saved; keep the trim in proportion.
                 let len = frames.len().max(1);
                 let ratio = len as f64 / snd.frames.max(1) as f64;
@@ -281,7 +304,7 @@ pub fn load(s: &mut Shared, root: &Path) -> Result<(), String> {
     }
 
     let mut seqs: Vec<Sequence> = (0..SEQUENCES).map(|_| Sequence::default()).collect();
-    for q in file.sequences {
+    for q in std::mem::take(&mut file.sequences) {
         let Some(seq) = seqs.get_mut(q.index) else { continue };
         seq.tempo = q.tempo.clamp(30.0, 300.0);
         seq.looping = q.looping;
@@ -310,7 +333,7 @@ pub fn load(s: &mut Shared, root: &Path) -> Result<(), String> {
         }
     }
 
-    let song = crate::audio::Song {
+    let song = Song {
         steps: file
             .song
             .steps
@@ -321,24 +344,31 @@ pub fn load(s: &mut Shared, root: &Path) -> Result<(), String> {
         looping: file.song.looping,
     };
 
-    s.stop();
-    s.pads = pads;
-    s.seqs = seqs;
-    s.song = song;
-    s.master = file.master.clamp(0.0, 1.0);
-    s.t.timing = file.timing.min(TIMING.len() - 1);
-    s.t.swing = file.swing.clamp(50, 75);
-    s.t.count_in = file.count_in;
-    s.t.click = file.click;
-    s.t.seq = 0;
-    s.t.track = 0;
-    s.t.solo = None;
-    s.t.undo = None;
-    s.locate(0);
-    Ok(())
+    Ok(Loaded { pads, seqs, song, file })
 }
 
-fn write_wav(path: &Path, snd: &Sound, rate: u32) -> Result<(), hound::Error> {
+impl Loaded {
+    /// Replaces the open project; quick enough to do while holding the engine lock.
+    pub fn apply(self, s: &mut Shared) {
+        let Loaded { pads, seqs, song, file } = self;
+        s.stop();
+        s.pads = pads;
+        s.seqs = seqs;
+        s.song = song;
+        s.master = file.master.clamp(0.0, 1.0);
+        s.t.timing = file.timing.min(TIMING.len() - 1);
+        s.t.swing = file.swing.clamp(50, 75);
+        s.t.count_in = file.count_in;
+        s.t.click = file.click;
+        s.t.seq = 0;
+        s.t.track = 0;
+        s.t.solo = None;
+        s.t.undo = None;
+        s.locate(0);
+    }
+}
+
+fn write_wav(path: &Path, frames: &Frames, rate: u32) -> Result<(), hound::Error> {
     let spec = hound::WavSpec {
         channels: 2,
         sample_rate: rate,
@@ -346,7 +376,7 @@ fn write_wav(path: &Path, snd: &Sound, rate: u32) -> Result<(), hound::Error> {
         sample_format: hound::SampleFormat::Float,
     };
     let mut w = hound::WavWriter::create(path, spec)?;
-    for [l, r] in snd.frames.iter() {
+    for [l, r] in frames.iter() {
         w.write_sample(*l)?;
         w.write_sample(*r)?;
     }
@@ -384,13 +414,13 @@ mod tests {
         s.song.looping = true;
 
         let dir = std::env::temp_dir().join(format!("rsampler-project-{}", std::process::id()));
-        let root = save(&s, &dir, "Beat").unwrap();
+        let root = save(&snapshot(&s), &dir, "Beat").unwrap();
         // Saving again over the same project works.
-        save(&s, &dir, "Beat").unwrap();
+        save(&snapshot(&s), &dir, "Beat").unwrap();
         assert!(is_project(&root));
 
         let mut t = audio::offline_shared(rate);
-        load(&mut t, &root).unwrap();
+        load(&root, rate).unwrap().apply(&mut t);
         fs::remove_dir_all(&dir).unwrap();
 
         assert_eq!(t.pads[0].tune, -35);
@@ -421,7 +451,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("rsampler-notproject-{}", std::process::id()));
         fs::create_dir_all(dir.join("Music")).unwrap();
         let s = audio::offline_shared(48_000);
-        assert!(save(&s, &dir, "Music").is_err());
+        assert!(save(&snapshot(&s), &dir, "Music").is_err());
         fs::remove_dir_all(&dir).unwrap();
     }
 }

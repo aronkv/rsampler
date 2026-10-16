@@ -587,9 +587,14 @@ impl App {
             return;
         }
         self.confirm = None;
-        match self.with(|s| project::load(s, &path)) {
-            Ok(()) => {
-                self.saved = self.with(|s| project::fingerprint(s));
+        // Reading the sounds can take a while; the engine is only locked to swap them in.
+        let rate = self.with(|s| s.rate);
+        match project::load(&path, rate) {
+            Ok(loaded) => {
+                self.saved = self.with(|s| {
+                    loaded.apply(s);
+                    project::fingerprint(s)
+                });
                 self.save_name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
                 self.project = Some(path);
                 self.title_changed = true;
@@ -606,10 +611,10 @@ impl App {
         match self.project.clone() {
             Some(root) => {
                 let dir = root.parent().map(PathBuf::from).unwrap_or_default();
-                let result = self.with(|s| project::save(s, &dir, &self.save_name).map(|_| project::fingerprint(s)));
-                match result {
-                    Ok(saved) => {
-                        self.saved = saved;
+                let (snap, fingerprint) = self.with(|s| (project::snapshot(s), project::fingerprint(s)));
+                match project::save(&snap, &dir, &self.save_name) {
+                    Ok(_) => {
+                        self.saved = fingerprint;
                         self.say(format!("Saved {}", self.save_name));
                     }
                     Err(e) => self.say(e),
@@ -640,10 +645,10 @@ impl App {
             return;
         }
         self.confirm = None;
-        let result = self.with(|s| project::save(s, &dir, &name).map(|root| (root, project::fingerprint(s))));
-        match result {
-            Ok((root, saved)) => {
-                self.saved = saved;
+        let (snap, fingerprint) = self.with(|s| (project::snapshot(s), project::fingerprint(s)));
+        match project::save(&snap, &dir, &name) {
+            Ok(root) => {
+                self.saved = fingerprint;
                 self.project = Some(root);
                 self.save_name = name;
                 self.title_changed = true;
@@ -789,9 +794,10 @@ impl App {
         self.samples_taken += 1;
         let name = format!("SAMPLE{:02}", self.samples_taken);
         let pad = self.pad;
+        let rate = self.with(|s| s.rate);
+        let frames: program::Frames = audio::resample(frames, from, rate).into();
         self.with(|s| {
-            let frames = audio::resample(frames, from, s.rate);
-            s.pads[pad].sound = Some(Sound::new(name.clone(), frames.into()));
+            s.pads[pad].sound = Some(Sound::new(name.clone(), frames));
             s.hits.push(Hit::Press { pad: pad as u8, velocity: KEY_VELOCITY, var: None });
         });
         self.say(format!("Kept {name} on {}", program::pad_name(pad)));
