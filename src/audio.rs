@@ -533,8 +533,12 @@ impl Shared {
                     self.send([0x80 | ch, pad + crate::midi::FIRST_NOTE, 0]);
                 }
                 // Only NOTE OFF sounds stop when the pad is let go; the others play out.
-                if self.pads[pad as usize].overlap == Overlap::NoteOff {
-                    voices.release(pad);
+                // With SIMULT or VEL SW the hit may be sounding on the other pads too.
+                let also = self.pads[pad as usize].also;
+                for target in std::iter::once(pad).chain(also.into_iter().flatten()) {
+                    if self.pads.get(target as usize).is_some_and(|p| p.overlap == Overlap::NoteOff) {
+                        voices.release(target);
+                    }
                 }
                 let len = self.seq().len();
                 let now = self.now();
@@ -763,7 +767,14 @@ impl Voices {
     }
 
     fn trigger(&mut self, pads: &[Pad], pad: u8, velocity: u8, var: Variation) {
-        let p = &pads[pad as usize];
+        for target in pads[pad as usize].targets(pad, velocity) {
+            // The NOTE VARIATION belongs to the pad that was hit.
+            self.play(pads, target, velocity, if target == pad { var } else { None });
+        }
+    }
+
+    fn play(&mut self, pads: &[Pad], pad: u8, velocity: u8, var: Variation) {
+        let Some(p) = pads.get(pad as usize) else { return };
         let Some(sound) = &p.sound else { return };
         for m in p.mutes.iter().flatten() {
             self.cut(*m);

@@ -46,6 +46,29 @@ impl Overlap {
     }
 }
 
+/// How a hit chooses its sounds: the MPC's sound generation mode.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub enum Generation {
+    #[default]
+    Normal,
+    /// Also plays up to two other pads, layered.
+    Simult,
+    /// Hits louder than a threshold play another pad instead.
+    VelSw,
+}
+
+impl Generation {
+    pub const ALL: [Generation; 3] = [Generation::Normal, Generation::Simult, Generation::VelSw];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Generation::Normal => "NORMAL",
+            Generation::Simult => "SIMULT",
+            Generation::VelSw => "VEL SW",
+        }
+    }
+}
+
 /// What the NOTE VARIATION slider changes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum VarParam {
@@ -94,6 +117,11 @@ pub struct Pad {
     pub level: u32,
     /// Mixer pan −50 (left) ..= 50 (right).
     pub pan: i32,
+    pub generation: Generation,
+    /// The other pads for SIMULT and VEL SW.
+    pub also: [Option<u8>; 2],
+    /// VEL SW: a velocity above `switch[i]` plays `also[i]` (the higher one wins).
+    pub switch: [u8; 2],
 }
 
 impl Default for Pad {
@@ -111,11 +139,27 @@ impl Default for Pad {
             mutes: [None, None],
             level: 100,
             pan: 0,
+            generation: Generation::Normal,
+            also: [None, None],
+            switch: [64, 100],
         }
     }
 }
 
 impl Pad {
+    /// The pads a hit plays: itself, plus its SIMULT layers, or the pad VEL SW picks.
+    pub fn targets(&self, pad: u8, velocity: u8) -> impl Iterator<Item = u8> {
+        let (first, layers) = match self.generation {
+            Generation::Normal => (pad, [None, None]),
+            Generation::Simult => (pad, self.also),
+            Generation::VelSw => {
+                let pick = (0..2).rev().find_map(|i| self.also[i].filter(|_| velocity > self.switch[i]));
+                (pick.unwrap_or(pad), [None, None])
+            }
+        };
+        std::iter::once(first).chain(layers.into_iter().flatten())
+    }
+
     /// The pad's parameters, without the sound, with a NOTE VARIATION applied. TUNE moves up to
     /// an octave either way from the slider's centre (64); the others replace the setting.
     pub fn varied(&self, var: Variation) -> Pad {
@@ -131,6 +175,9 @@ impl Pad {
             mutes: self.mutes,
             level: self.level,
             pan: self.pan,
+            generation: self.generation,
+            also: self.also,
+            switch: self.switch,
         };
         if let Some((param, v)) = var {
             let scaled = v.min(127) as u32 * 100 / 127;
@@ -163,6 +210,18 @@ mod tests {
         assert_eq!(pad_name(0), "A01");
         assert_eq!(pad_name(17), "B02");
         assert_eq!(pad_name(63), "D16");
+    }
+
+    #[test]
+    fn generation_targets() {
+        let mut p = Pad { also: [Some(5), Some(9)], switch: [44, 88], ..Pad::default() };
+        assert_eq!(p.targets(1, 100).collect::<Vec<_>>(), [1]);
+        p.generation = Generation::Simult;
+        assert_eq!(p.targets(1, 100).collect::<Vec<_>>(), [1, 5, 9]);
+        p.generation = Generation::VelSw;
+        assert_eq!(p.targets(1, 30).collect::<Vec<_>>(), [1]);
+        assert_eq!(p.targets(1, 60).collect::<Vec<_>>(), [5]);
+        assert_eq!(p.targets(1, 120).collect::<Vec<_>>(), [9]);
     }
 
     #[test]

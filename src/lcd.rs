@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::audio::{RecMode, Shared};
-use crate::program::pad_name;
+use crate::program::{Generation, pad_name};
 use crate::seq::TIMING;
 
 /// LOAD and SAVE screens: a directory listing of subfolders, and WAV files when loading.
@@ -120,6 +120,11 @@ pub enum Field {
     ClockOut,
     Sync,
     KeyVelocity,
+    GenMode,
+    Also1,
+    Also2,
+    Switch1,
+    Switch2,
 }
 
 pub struct Seg {
@@ -487,7 +492,7 @@ pub fn rows(v: &View) -> Vec<Row> {
                         t("  Reso:"),
                         f(Field::Reso, format!("{:3}", p.resonance)),
                     ],
-                    vec![],
+                    vec![t("Mode:"), f(Field::GenMode, p.generation.label())],
                 ),
                 row(
                     vec![
@@ -507,7 +512,26 @@ pub fn rows(v: &View) -> Vec<Row> {
                         t("  Pan:"),
                         f(Field::Pan, pan_text(p.pan)),
                     ],
-                    vec![],
+                    match p.generation {
+                        Generation::Normal => vec![],
+                        Generation::Simult => vec![
+                            t("Also:"),
+                            f(Field::Also1, mute_text(p.also[0])),
+                            t(" "),
+                            f(Field::Also2, mute_text(p.also[1])),
+                        ],
+                        // "Over 64:A02" plays A02 for velocities above 64.
+                        Generation::VelSw => vec![
+                            t("Over "),
+                            f(Field::Switch1, p.switch[0].to_string()),
+                            t(":"),
+                            f(Field::Also1, mute_text(p.also[0])),
+                            t(" "),
+                            f(Field::Switch2, p.switch[1].to_string()),
+                            t(":"),
+                            f(Field::Also2, mute_text(p.also[1])),
+                        ],
+                    },
                 ),
             ];
             msg(&mut rows);

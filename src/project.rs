@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::audio::{Shared, Song, load_wav};
-use crate::program::{Frames, Overlap, PADS, Pad, Sound, VarParam, pad_name};
+use crate::program::{Frames, Generation, Overlap, PADS, Pad, Sound, VarParam, pad_name};
 use crate::seq::{Note, SEQUENCES, Sequence, TIMING, TRACKS};
 
 pub const FILE: &str = "rsampler.json";
@@ -54,7 +54,7 @@ struct SongFile {
     looping: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, PartialEq)]
 struct PadFile {
     pad: usize,
     sound: Option<SoundFile>,
@@ -68,9 +68,19 @@ struct PadFile {
     mutes: [Option<u8>; 2],
     level: u32,
     pan: i32,
+    #[serde(default)]
+    generation: Generation,
+    #[serde(default)]
+    also: [Option<u8>; 2],
+    #[serde(default = "default_switch")]
+    switch: [u8; 2],
 }
 
-#[derive(Serialize, Deserialize)]
+fn default_switch() -> [u8; 2] {
+    Pad::default().switch
+}
+
+#[derive(Serialize, Deserialize, PartialEq)]
 struct SoundFile {
     name: String,
     /// Relative to the project folder.
@@ -119,45 +129,10 @@ fn describe(s: &Shared) -> ProjectFile {
             start: snd.start,
             end: snd.end,
         });
-        let changed = sound.is_some()
-            || (
-                p.tune,
-                p.attack,
-                p.decay,
-                p.decay_from_start,
-                p.cutoff,
-                p.resonance,
-                p.overlap,
-                p.mutes,
-                p.level,
-                p.pan,
-            ) != (
-                default.tune,
-                default.attack,
-                default.decay,
-                default.decay_from_start,
-                default.cutoff,
-                default.resonance,
-                default.overlap,
-                default.mutes,
-                default.level,
-                default.pan,
-            );
-        if changed {
-            pads.push(PadFile {
-                pad: i,
-                sound,
-                tune: p.tune,
-                attack: p.attack,
-                decay: p.decay,
-                decay_from_start: p.decay_from_start,
-                cutoff: p.cutoff,
-                resonance: p.resonance,
-                overlap: p.overlap,
-                mutes: p.mutes,
-                level: p.level,
-                pan: p.pan,
-            });
+        let file = pad_file(i, p, sound);
+        // Pads left at their defaults are not written.
+        if file.sound.is_some() || file != pad_file(i, &default, None) {
+            pads.push(file);
         }
     }
 
@@ -219,6 +194,26 @@ fn describe(s: &Shared) -> ProjectFile {
             looping: s.song.looping,
         },
         setup: SetupFile { clock_out: s.t.clock_out, key_velocity: s.key_velocity, sync: s.t.sync },
+    }
+}
+
+fn pad_file(pad: usize, p: &Pad, sound: Option<SoundFile>) -> PadFile {
+    PadFile {
+        pad,
+        sound,
+        tune: p.tune,
+        attack: p.attack,
+        decay: p.decay,
+        decay_from_start: p.decay_from_start,
+        cutoff: p.cutoff,
+        resonance: p.resonance,
+        overlap: p.overlap,
+        mutes: p.mutes,
+        level: p.level,
+        pan: p.pan,
+        generation: p.generation,
+        also: p.also,
+        switch: p.switch,
     }
 }
 
@@ -330,6 +325,9 @@ pub fn load(root: &Path, rate: u32) -> Result<Loaded, String> {
             mutes: p.mutes.map(|m| m.filter(|&m| (m as usize) < PADS)),
             level: p.level.min(100),
             pan: p.pan.clamp(-50, 50),
+            generation: p.generation,
+            also: p.also.map(|m| m.filter(|&m| (m as usize) < PADS)),
+            switch: p.switch.map(|v| v.min(127)),
         };
     }
 
@@ -432,6 +430,9 @@ mod tests {
         s.pads[0].tune = -35;
         s.pads[1].overlap = Overlap::NoteOff;
         s.pads[2].mutes = [Some(3), None];
+        s.pads[2].generation = Generation::VelSw;
+        s.pads[2].also = [Some(0), Some(1)];
+        s.pads[2].switch = [40, 90];
         s.pads[3].sound.as_mut().unwrap().start = 100;
         s.seqs[4].tempo = 93.5;
         s.seqs[4].set_bars(4);
@@ -463,6 +464,10 @@ mod tests {
         assert_eq!(t.pads[0].tune, -35);
         assert_eq!(t.pads[1].overlap, Overlap::NoteOff);
         assert_eq!(t.pads[2].mutes, [Some(3), None]);
+        assert_eq!(
+            (t.pads[2].generation, t.pads[2].also, t.pads[2].switch),
+            (Generation::VelSw, [Some(0), Some(1)], [40, 90])
+        );
         let clap = t.pads[3].sound.as_ref().unwrap();
         assert_eq!((clap.name.as_str(), clap.start), ("CLAP", 100));
         assert_eq!(&*clap.frames, &*s.pads[3].sound.as_ref().unwrap().frames);

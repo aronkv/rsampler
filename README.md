@@ -181,6 +181,7 @@ Open it with the blue **6 / PROGRAM** key. Hit a pad (or change `Pad`) to choose
 | `Reso`    | Filter resonance                                                           |
 | `Overlap` | POLY layers repeated hits, MONO cuts the previous hit, NOTE OFF stops when the pad is released |
 | `Mutes`   | Up to two pads this pad cuts off, e.g. a closed hi-hat stopping an open one |
+| `Mode`    | NORMAL; SIMULT also plays the two `Also` pads, layered; VEL SW plays another pad when hit harder than its threshold (`Over 64:A02 100:A03`: above 64 plays A02, above 100 plays A03) |
 | `Level`, `Pan` | Same as in the mixer                                                  |
 
 **CLEAR** (F6) removes the pad's sound.
@@ -210,8 +211,8 @@ directly.
 
 An MPC2000XL program (`.PGM`) loads onto all 64 pads at once (press `Enter` twice): each pad gets
 its sound from the `.SND` files next to the program, with the program's tuning, envelope, filter,
-overlap, mute assign, level and pan. Sounds that are not there are listed on the LCD. The MPC's
-SIMULT and velocity-switch modes and its velocity modulation are not carried over yet.
+overlap, mute assign, SIMULT / VEL SW mode, level and pan. Sounds that are not there are listed on
+the LCD. The MPC's velocity modulation and decay switch are not carried over yet.
 
 ### SAMPLE: recording from the input
 

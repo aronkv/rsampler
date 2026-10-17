@@ -522,6 +522,21 @@ impl App {
                     let i = ORDER.iter().position(|&o| o == p.overlap).unwrap_or(0) as i32;
                     p.overlap = ORDER[(i + d).rem_euclid(3) as usize];
                 }
+                Field::GenMode => {
+                    let all = program::Generation::ALL;
+                    let i = all.iter().position(|g| *g == p.generation).unwrap_or(0) as i32;
+                    p.generation = all[(i + d).rem_euclid(all.len() as i32) as usize];
+                }
+                Field::Also1 | Field::Also2 => {
+                    let a = &mut p.also[(field == Field::Also2) as usize];
+                    // −1 stands for "off", before A01; a pad does not layer itself.
+                    let v = (a.map_or(-1, |p| p as i32) + d).clamp(-1, PADS as i32 - 1);
+                    *a = (v >= 0 && v as usize != pad).then_some(v as u8);
+                }
+                Field::Switch1 | Field::Switch2 => {
+                    let t = &mut p.switch[(field == Field::Switch2) as usize];
+                    *t = (*t as i32 + d).clamp(0, 127) as u8;
+                }
                 Field::Mute1 | Field::Mute2 => {
                     let m = &mut p.mutes[(field == Field::Mute2) as usize];
                     // −1 stands for "off", before A01.

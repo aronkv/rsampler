@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use crate::program::{Overlap, PADS, Pad};
+use crate::program::{Generation, Overlap, PADS, Pad};
 use crate::snd;
 
 /// The MPC numbers its 64 drum notes 35–98; 34 (or 0) means "none".
@@ -27,6 +27,10 @@ pub struct NoteParams {
     pub resonance: u32,
     pub level: u32,
     pub pan: i32,
+    pub generation: Generation,
+    /// Notes played along (SIMULT) or instead (VEL SW).
+    pub also: [Option<usize>; 2],
+    pub switch: [u8; 2],
 }
 
 pub struct Pgm {
@@ -79,6 +83,13 @@ pub fn parse(b: &[u8]) -> Result<Pgm, String> {
                 resonance: (q[15].min(15) as u32 * 100).div_ceil(15),
                 level: m[1].min(100) as u32,
                 pan: m[2].min(100) as i32 - 50,
+                generation: match q[1] {
+                    1 => Generation::Simult,
+                    2 => Generation::VelSw,
+                    _ => Generation::Normal,
+                },
+                also: [note_index(q[3]), note_index(q[5])],
+                switch: [q[2].min(127), q[4].min(127)],
             };
             Some((n, params))
         })
@@ -142,6 +153,9 @@ pub fn load(path: &Path, rate: u32) -> Result<Loaded, String> {
             mutes: q.mutes.map(|m| m.and_then(pad_of_note).map(|p| p as u8)),
             level: q.level,
             pan: q.pan,
+            generation: q.generation,
+            also: q.also.map(|m| m.and_then(pad_of_note).map(|p| p as u8)),
+            switch: q.switch,
         });
     }
     let mut note_pads = [None; 64];
@@ -176,6 +190,7 @@ mod tests {
                 _ => NO_SOUND,
             };
             if n == 2 {
+                (q[1], q[2], q[3]) = (2, 44, 36);
                 q[6] = 2;
                 q[7] = 36;
                 q[8] = 34;
@@ -216,6 +231,9 @@ mod tests {
                 resonance: 100,
                 level: 80,
                 pan: -20,
+                generation: Generation::VelSw,
+                also: [Some(1), None],
+                switch: [44, 0],
             }
         );
         assert_eq!(pgm.pads[1].as_ref().unwrap().1.sound.as_deref(), Some("KICK"));
