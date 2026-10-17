@@ -404,9 +404,9 @@ shows the version and the output sample rate.
 - Windows-specific testing
 - The MISC mode
 - TIME STRETCH and INSERT SOUND in the EDIT window
+- The filter envelope in PROGRAM
 - Loading the MPC's `.SEQ`, `.APS` and `.ALL` files; its `.SND` sounds, `.PGM` programs and
   `.MID` sequences already load
-- Windows builds
 
 ## Reference
 
