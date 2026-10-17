@@ -192,8 +192,9 @@ impl Pad {
             let scaled = v.min(127) as u32 * 100 / 127;
             match param {
                 VarParam::Tune => {
-                    // 0..64 and 64..127 each span a full octave.
-                    let offset = (v as i32 - 64) * 120 / if v >= 64 { 63 } else { 64 };
+                    // As on the MPC: 0.2 semitone per step from 64, up to an octave either way,
+                    // so 5 steps are exactly a semitone.
+                    let offset = ((v as i32 - 64) * 2).clamp(-120, 120);
                     p.tune = (p.tune + offset).clamp(-120, 120);
                 }
                 VarParam::Decay => p.decay = scaled,
@@ -242,6 +243,7 @@ mod tests {
         assert_eq!(p.varied(Some((VarParam::Tune, 127))).tune, 120);
         assert_eq!(Pad::default().varied(Some((VarParam::Tune, 127))).tune, 120);
         assert_eq!(Pad::default().varied(Some((VarParam::Tune, 0))).tune, -120);
+        assert_eq!(p.varied(Some((VarParam::Tune, 69))).tune, 20);
         assert_eq!(p.varied(Some((VarParam::Filter, 127))).cutoff, 100);
         assert_eq!(p.varied(Some((VarParam::Decay, 0))).decay, 0);
     }
