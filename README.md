@@ -68,7 +68,7 @@ between its fields, and the **DATA** wheel changes the highlighted field. The si
 ### Pads
 
 Click a pad or hit its key. On the mouse, hitting higher on a pad plays louder; keys always play at
-velocity 101 (changeable in SETUP), and **FULL LEVEL** makes everything 127.
+velocity 101 (changeable in SETUP), and **FULL LEVEL** (`F7`) makes everything 127.
 
 The keys follow their physical position, so the layout works the same on QWERTY, QWERTZ (Hungarian,
 German) and AZERTY keyboards:
@@ -83,12 +83,21 @@ German) and AZERTY keyboards:
 Keys pressed together with Shift, Ctrl or Alt never play pads, so shortcuts and symbols such as
 `+` (Shift+3 on a Hungarian keyboard) work.
 
-**PAD BANK A–D** switches between four banks of 16 pads (A01–D16). Bank A starts with a built-in
+**PAD BANK A–D** (`Tab` / `Shift+Tab`) switches between four banks of 16 pads (A01–D16). Bank A starts with a built-in
 kick, snare, hi-hat and clap on pads 1–4. The last pad you hit is the selected pad that the
 PROGRAM, MIXER, TRIM and LOAD screens work on.
 
-**16 LEVELS** spreads the selected pad's sound over all 16 pads, from velocity 7 on pad 1 to 127 on
-pad 16. Press it again to go back.
+**16 LEVELS** (`F8`) spreads one sound over all 16 pads and opens its ASSIGN screen: `Note` is the
+pad whose sound is spread (the selected one to begin with), and `Param` what changes from pad to
+pad:
+
+- VELOCITY: velocity 7 on pad 1 up to 127 on pad 16.
+- NOTE VAR: the `Type` TUNE, DECAY, ATTACK or FILTER changes across the pads. TUNE plays the
+  sound at its own pitch on the `Original key pad` (4 by default) and a semitone higher on each
+  pad after it, so a sound can be played like a keyboard; the others run from 6 on pad 1 to 96 on
+  pad 16.
+
+Notes recorded this way keep their variation. Press 16 LEVELS again to go back.
 
 ### NOTE VARIATION
 
@@ -354,6 +363,8 @@ shows the version and the output sample rate.
 | `Page Up` / `Page Down`     | BAR << / >>                  |
 | `Home`                      | GO TO start                  |
 | `F1`–`F6`                   | Soft keys                    |
+| `F7` / `F8`                 | FULL LEVEL / 16 LEVELS       |
+| `Tab` / `Shift+Tab`         | Next / previous PAD BANK     |
 | `Ctrl+1` / `3`–`9`          | SONG / LOAD, SAMPLE, TRIM, PROGRAM, SETUP, MIXER, OTHER |
 | `Esc`                       | MAIN SCREEN                  |
 

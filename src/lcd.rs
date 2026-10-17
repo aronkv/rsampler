@@ -53,6 +53,8 @@ pub enum Screen {
     Song,
     /// NOTE VARIATION assign.
     Assign,
+    /// 16 LEVELS assign.
+    Levels,
     Setup,
     Other,
 }
@@ -101,7 +103,7 @@ impl Screen {
             Screen::Edit(_) => ["", "", "", "CANCEL", "DO IT", ""],
             Screen::Sample => ["", "", "", "", "", "REC"],
             Screen::Song => ["INSERT", "DELETE", "", "", "", ""],
-            Screen::Assign | Screen::Setup | Screen::Other => ["", "", "", "", "", ""],
+            Screen::Assign | Screen::Levels | Screen::Setup | Screen::Other => ["", "", "", "", "", ""],
         }
     }
 
@@ -187,6 +189,10 @@ pub enum Field {
     FirstBar,
     LastBar,
     AfterBar,
+    LevelsPad,
+    LevelsParam,
+    LevelsType,
+    LevelsKey,
 }
 
 /// The settings of the sequence EDIT screens, kept between visits like on the MPC.
@@ -274,6 +280,8 @@ pub struct View<'a> {
     /// EDIT: the operation and the pad new sounds go to.
     pub edit: (crate::edit::Op, usize),
     pub seq_edit: &'a SeqEdit,
+    /// 16 LEVELS: the pad, NOTE VAR's parameter (None = VELOCITY), and the original-key pad.
+    pub levels: (usize, Option<crate::program::VarParam>, usize),
 }
 
 /// What the SAMPLE screen shows.
@@ -302,7 +310,11 @@ fn status(s: &Shared) -> &'static str {
 }
 
 fn sound_name(v: &View) -> String {
-    v.s.pads[v.pad].sound.as_ref().map_or("(no sound)".to_owned(), |s| s.name.chars().take(20).collect())
+    sound_name_of(v.s, v.pad)
+}
+
+fn sound_name_of(s: &Shared, pad: usize) -> String {
+    s.pads[pad].sound.as_ref().map_or("(no sound)".to_owned(), |s| s.name.chars().take(20).collect())
 }
 
 pub fn rows(v: &View) -> Vec<Row> {
@@ -448,6 +460,29 @@ pub fn rows(v: &View) -> Vec<Row> {
                 row(vec![t("Apache License 2.0")], vec![]),
                 row(vec![t("github.com/aronkv/rsampler")], vec![]),
             ];
+            msg(&mut rows);
+            rows
+        }
+        Screen::Levels => {
+            let (pad, var, key) = v.levels;
+            let mut rows = vec![
+                row(vec![t("ASSIGN 16 LEVELS")], vec![]),
+                row(
+                    vec![t("Note:"), f(Field::LevelsPad, pad_name(pad)), t(format!("  {}", sound_name_of(s, pad)))],
+                    vec![],
+                ),
+                row(
+                    vec![t("Param:"), f(Field::LevelsParam, if var.is_some() { "NOTE VAR" } else { "VELOCITY" })],
+                    vec![],
+                ),
+            ];
+            if let Some(param) = var {
+                let mut r = vec![t("Type:"), f(Field::LevelsType, param.label())];
+                if param == crate::program::VarParam::Tune {
+                    r.extend([t("  Original key pad:"), f(Field::LevelsKey, format!("{:2}", key + 1))]);
+                }
+                rows.push(row(r, vec![]));
+            }
             msg(&mut rows);
             rows
         }

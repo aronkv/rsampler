@@ -103,6 +103,10 @@ struct App {
     full_level: bool,
     sixteen_levels: bool,
     levels_pad: usize,
+    /// 16 LEVELS NOTE VAR: what the pads change (None = velocity), and the pad (0..16) that plays
+    /// at the original pitch for TUNE.
+    levels_var: Option<program::VarParam>,
+    levels_key: usize,
     shift: bool,
     taps: Vec<Instant>,
     /// Folder of the open project, once saved or loaded.
@@ -159,6 +163,9 @@ enum Action {
     Start,
     Tap,
     Save,
+    Bank(i32),
+    FullLevel,
+    SixteenLevels,
 }
 
 impl App {
@@ -200,6 +207,9 @@ impl App {
             full_level: false,
             sixteen_levels: false,
             levels_pad: 0,
+            levels_var: None,
+            // The MPC's default: pad 4 plays the sound as it is.
+            levels_key: 3,
             shift: false,
             taps: Vec::new(),
             project: None,
@@ -254,18 +264,19 @@ impl App {
     }
 
     fn pad_press(&mut self, n: usize, velocity: u8) {
-        let (pad, velocity) = if self.sixteen_levels {
-            // 16 LEVELS: every pad plays the chosen sound, from velocity 7 on pad 1 to 127 on pad 16.
-            (self.levels_pad, (n * 8 + 7) as u8)
+        let velocity = if self.full_level { 127 } else { velocity };
+        let (pad, velocity, levels) = if self.sixteen_levels {
+            let (velocity, var) = sixteen_levels(n, velocity, self.levels_var, self.levels_key);
+            (self.levels_pad, velocity, var)
         } else {
-            (self.bank * 16 + n, if self.full_level { 127 } else { velocity })
+            (self.bank * 16 + n, velocity, None)
         };
         self.sent[n] = pad as u8;
         self.velocity = velocity;
         if !self.sixteen_levels {
             self.pad = pad;
         }
-        let var = (pad == self.var_pad).then_some((self.var_param, self.var_value));
+        let var = levels.or((pad == self.var_pad).then_some((self.var_param, self.var_value)));
         self.with(|s| s.hits.push(Hit::Press { pad: pad as u8, velocity, var }));
         if matches!(self.screen, Screen::Step) {
             self.step_record(pad as u8, velocity, var);
@@ -364,6 +375,7 @@ impl App {
             zone: (self.zone, &self.zones),
             edit: (self.edit_op, self.edit_to),
             seq_edit: &self.seq_edit,
+            levels: (self.levels_pad, self.levels_var, self.levels_key),
             sample: self.input.as_ref().map(|input| {
                 let c = input.lock();
                 lcd::SampleView {
@@ -485,6 +497,19 @@ impl App {
                 let i = ops.iter().position(|o| *o == self.edit_op).unwrap_or(0) as i32;
                 return self.edit_op = ops[(i + d).clamp(0, ops.len() as i32 - 1) as usize];
             }
+            Field::LevelsPad => {
+                return self.levels_pad = (self.levels_pad as i32 + d).clamp(0, PADS as i32 - 1) as usize;
+            }
+            Field::LevelsParam => {
+                return self.levels_var = if self.levels_var.is_some() { None } else { Some(program::VarParam::Tune) };
+            }
+            Field::LevelsType => {
+                let all = program::VarParam::ALL;
+                let i = all.iter().position(|p| Some(*p) == self.levels_var).unwrap_or(0) as i32;
+                return self.levels_var = Some(all[(i + d).rem_euclid(all.len() as i32) as usize]);
+            }
+            // The MPC allows pads 4–13.
+            Field::LevelsKey => return self.levels_key = (self.levels_key as i32 + d).clamp(3, 12) as usize,
             Field::EvOp
             | Field::EvPad
             | Field::EvFrom
@@ -668,7 +693,11 @@ impl App {
                 | Field::EvValue
                 | Field::FirstBar
                 | Field::LastBar
-                | Field::AfterBar => {}
+                | Field::AfterBar
+                | Field::LevelsPad
+                | Field::LevelsParam
+                | Field::LevelsType
+                | Field::LevelsKey => {}
             }
         });
     }
@@ -1309,6 +1338,24 @@ impl App {
         }
     }
 
+    fn set_bank(&mut self, bank: usize) {
+        self.bank = bank;
+        if matches!(self.screen, Screen::Mixer) {
+            self.pad = bank * 16 + self.pad % 16;
+        }
+    }
+
+    /// Turning 16 LEVELS on opens its ASSIGN window, as on the MPC.
+    fn toggle_sixteen_levels(&mut self) {
+        self.sixteen_levels ^= true;
+        if self.sixteen_levels {
+            self.levels_pad = self.pad;
+            self.set_screen(Screen::Levels);
+        } else if matches!(self.screen, Screen::Levels) {
+            self.set_screen(Screen::Main);
+        }
+    }
+
     fn tap_tempo(&mut self) {
         let now = Instant::now();
         if self.taps.last().is_some_and(|t| now - *t > Duration::from_secs(2)) {
@@ -1379,6 +1426,9 @@ impl App {
                 }
             }
             Action::Save => self.quick_save(),
+            Action::Bank(d) => self.set_bank((self.bank as i32 + d).rem_euclid(4) as usize),
+            Action::FullLevel => self.full_level ^= true,
+            Action::SixteenLevels => self.toggle_sixteen_levels(),
         }
     }
 
@@ -1444,6 +1494,9 @@ impl App {
                 Key::PageDown => Action::Bar(1),
                 Key::Home => Action::Start,
                 Key::T if !repeat => Action::Tap,
+                Key::Tab => Action::Bank(if modifiers.shift { -1 } else { 1 }),
+                Key::F7 => Action::FullLevel,
+                Key::F8 => Action::SixteenLevels,
                 _ => continue,
             };
             actions.push(action);
@@ -1890,13 +1943,7 @@ impl App {
             if key(ui, p, p.rect(x - 14.0, y + 18.0, 28.0, 14.0), &WHITE, "", false).clicked() {
                 match i {
                     0 => self.full_level ^= true,
-                    1 => {
-                        self.sixteen_levels ^= true;
-                        self.levels_pad = self.pad;
-                        if self.sixteen_levels {
-                            self.say(format!("16 LEVELS: {} velocity", program::pad_name(self.pad)));
-                        }
-                    }
+                    1 => self.toggle_sixteen_levels(),
                     2 => self.with(|s| s.select_seq((s.t.next_seq.unwrap_or(s.t.seq) + 1).min(seq::SEQUENCES - 1))),
                     _ => self.with(|s| {
                         let tr = s.t.track;
@@ -1941,10 +1988,7 @@ impl App {
             p.label(painter, x + 14.0, 221.0, name, 7.0);
             led(painter, p, x + 14.0, 229.0, self.bank == i, GREEN_ON, GREEN_OFF);
             if key(ui, p, p.rect(x, 237.0, 28.0, 14.0), &WHITE, "", false).clicked() {
-                self.bank = i;
-                if matches!(self.screen, Screen::Mixer) {
-                    self.pad = i * 16 + self.pad % 16;
-                }
+                self.set_bank(i);
             }
         }
     }
@@ -1970,6 +2014,20 @@ impl App {
             self.mouse_held[n] = down;
             pad(painter, p, rect, down || self.key_held[n]);
         }
+    }
+}
+
+/// 16 LEVELS: what pad `n` (0..16) plays. VELOCITY spreads 7..127 over the pads; NOTE VAR keeps
+/// the velocity and gives each pad its own variation value: a semitone per pad from the
+/// original-key pad for TUNE, 6..96 for the others. The numbers are the MPC2000XL's.
+fn sixteen_levels(n: usize, velocity: u8, var: Option<program::VarParam>, key: usize) -> (u8, program::Variation) {
+    match var {
+        None => ((n * 8 + 7) as u8, None),
+        Some(program::VarParam::Tune) => {
+            (velocity, Some((program::VarParam::Tune, (64 + (n as i32 - key as i32) * 5).clamp(4, 124) as u8)))
+        }
+        // Rounded up so the parameter (value × 100 / 127) lands on 6, 12, … 96.
+        Some(p) => (velocity, Some((p, ((6 * (n as u32 + 1) * 127).div_ceil(100)) as u8))),
     }
 }
 
@@ -2019,4 +2077,21 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native("rsampler", options, Box::new(|_| Ok(Box::new(App::new()))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use program::{Pad, VarParam};
+
+    #[test]
+    fn sixteen_levels_values() {
+        assert_eq!(sixteen_levels(0, 90, None, 3), (7, None));
+        assert_eq!(sixteen_levels(15, 90, None, 3).0, 127);
+        // TUNE: pad 4 is the original pitch, each pad a semitone more.
+        let tune = |n| Pad::default().varied(sixteen_levels(n, 90, Some(VarParam::Tune), 3).1).tune;
+        assert_eq!((tune(3), tune(4), tune(0), tune(15)), (0, 10, -30, 120));
+        let decay = |n| Pad::default().varied(sixteen_levels(n, 90, Some(VarParam::Decay), 3).1).decay;
+        assert_eq!((decay(0), decay(15)), (6, 96));
+    }
 }
