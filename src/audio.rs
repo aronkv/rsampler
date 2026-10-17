@@ -532,7 +532,10 @@ impl Shared {
                 if let Some(ch) = self.thru() {
                     self.send([0x80 | ch, pad + crate::midi::FIRST_NOTE, 0]);
                 }
-                voices.release(pad);
+                // Only NOTE OFF sounds stop when the pad is let go; the others play out.
+                if self.pads[pad as usize].overlap == Overlap::NoteOff {
+                    voices.release(pad);
+                }
                 let len = self.seq().len();
                 let now = self.now();
                 // The duration is how long the pad was held, wherever quantizing moved the start.
@@ -759,7 +762,6 @@ impl Voices {
         }
     }
 
-    // Only NOTE OFF voices react to a release; the others play out.
     fn trigger(&mut self, pads: &[Pad], pad: u8, velocity: u8, var: Variation) {
         let p = &pads[pad as usize];
         let Some(sound) = &p.sound else { return };
@@ -1218,6 +1220,16 @@ mod tests {
         s.hits.push(Hit::Release { pad: 0 });
         run(&mut s, &mut v, 48_000 / 100);
         assert!(v.voices.is_empty());
+    }
+
+    #[test]
+    fn letting_go_of_a_poly_pad_lets_it_ring() {
+        let (mut s, mut v) = with_kit(48_000);
+        s.hits.push(Hit::Press { pad: 0, velocity: 100, var: None });
+        run(&mut s, &mut v, 10);
+        s.hits.push(Hit::Release { pad: 0 });
+        // Well past any release time, the kick is still sounding.
+        assert!(run(&mut s, &mut v, 4_800) > 0.1);
     }
 
     #[test]
