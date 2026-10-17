@@ -142,6 +142,8 @@ struct App {
     edit_op: edit::Op,
     /// EDIT: the first pad new sounds go to.
     edit_to: usize,
+    /// TIME STRETCH: new length in tenths of a percent of the old.
+    edit_ratio: u32,
     seq_edit: lcd::SeqEdit,
 }
 
@@ -250,6 +252,7 @@ impl App {
             zone: 0,
             edit_op: edit::Op::Discard,
             edit_to: 16,
+            edit_ratio: 1000,
             seq_edit: lcd::SeqEdit {
                 op: seq::EventOp::Copy,
                 pad: None,
@@ -409,7 +412,7 @@ impl App {
             song_step: self.song_step,
             var: (self.var_pad, self.var_param, self.var_value),
             zone: (self.zone, &self.zones),
-            edit: (self.edit_op, self.edit_to),
+            edit: (self.edit_op, self.edit_to, self.edit_ratio),
             seq_edit: &self.seq_edit,
             levels: (self.levels_pad, self.levels_var, self.levels_key),
             bank: self.bank,
@@ -534,6 +537,11 @@ impl App {
                     .collect();
                 let i = ops.iter().position(|o| *o == self.edit_op).unwrap_or(0) as i32;
                 return self.edit_op = ops[(i + d).clamp(0, ops.len() as i32 - 1) as usize];
+            }
+            // 1 % a step, 0.1 % with Shift.
+            Field::EditRatio => {
+                let by = if fine { d } else { d * 10 };
+                return self.edit_ratio = (self.edit_ratio as i32 + by).clamp(500, 2000) as u32;
             }
             Field::OutPort => {
                 let choices = midi::MidiOut::choices();
@@ -746,7 +754,8 @@ impl App {
                 | Field::LevelsParam
                 | Field::LevelsType
                 | Field::LevelsKey
-                | Field::OutPort => {}
+                | Field::OutPort
+                | Field::EditRatio => {}
             }
         });
     }
@@ -858,6 +867,22 @@ impl App {
         }
     }
 
+    /// TIME STRETCH: the section as a new sound on `To pad`. The stretching runs without the
+    /// audio lock, so playback carries on meanwhile.
+    fn time_stretch(&mut self, range: std::ops::Range<usize>, ratio: u32, from: Section) {
+        let (pad, to) = (self.pad, self.edit_to);
+        let Some((snd, rate)) = self.with(|s| s.pads[pad].sound.clone().map(|snd| (snd, s.rate))) else {
+            return self.say("No sound on this pad");
+        };
+        let name = format!("{}-T", snd.name.chars().take(13).collect::<String>());
+        let part = edit::section(&snd, range, name);
+        let frames = edit::stretch(&part.frames, ratio as f64 / 1000.0, rate);
+        let sound = Sound::new(part.name, frames.into());
+        self.with(|s| s.pads[to] = program::Pad { sound: Some(sound), ..program::Pad::default() });
+        self.set_screen(from.screen());
+        self.say(format!("Stretched to {:.1}% on {}", ratio as f32 / 10.0, program::pad_name(to)));
+    }
+
     /// The part of the selected pad's sound EDIT works on.
     fn section(&self, section: Section) -> std::ops::Range<usize> {
         self.with(|s| {
@@ -872,13 +897,16 @@ impl App {
 
     /// EDIT's DO IT.
     fn do_edit(&mut self, from: Section) {
-        let (op, pad, to) = (self.edit_op, self.pad, self.edit_to);
+        let (op, pad, to, ratio) = (self.edit_op, self.pad, self.edit_to, self.edit_ratio);
         let range = self.section(from);
         let ranges = if op == edit::Op::Slice {
             self.zones.windows(2).map(|w| w[0]..w[1]).collect()
         } else {
             vec![range.clone()]
         };
+        if op == edit::Op::TimeStretch {
+            return self.time_stretch(range, ratio, from);
+        }
         let msg = self.with(|s| {
             let Some(snd) = s.pads[pad].sound.clone() else { return "No sound on this pad".to_owned() };
             if !op.makes_sounds() {

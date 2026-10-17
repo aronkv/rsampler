@@ -210,6 +210,7 @@ pub enum Field {
     VeloStart,
     VeloFilter,
     OutPort,
+    EditRatio,
 }
 
 /// The settings of the sequence EDIT screens, kept between visits like on the MPC.
@@ -294,8 +295,9 @@ pub struct View<'a> {
     pub var: (usize, crate::program::VarParam, u8),
     /// ZONE: the selected zone and the zone bounds of the selected pad's sound.
     pub zone: (usize, &'a [usize]),
-    /// EDIT: the operation and the pad new sounds go to.
-    pub edit: (crate::edit::Op, usize),
+    /// EDIT: the operation, the pad new sounds go to, and TIME STRETCH's ratio in tenths of a
+    /// percent.
+    pub edit: (crate::edit::Op, usize, u32),
     pub seq_edit: &'a SeqEdit,
     /// Selected PAD BANK, 0..4.
     pub bank: usize,
@@ -910,7 +912,7 @@ pub fn rows(v: &View) -> Vec<Row> {
             rows
         }
         Screen::Edit(section) => {
-            let (op, to) = v.edit;
+            let (op, to, ratio) = v.edit;
             let what = match section {
                 Section::Trim => "St to End",
                 Section::Loop => "loop (To to End)",
@@ -927,6 +929,13 @@ pub fn rows(v: &View) -> Vec<Row> {
                 let last = (to + count - 1).min(crate::program::PADS - 1);
                 let range = if count > 1 { format!(" to {}", pad_name(last)) } else { String::new() };
                 rows.push(row(vec![t("To pad:"), f(Field::EditTo, pad_name(to)), t(range)], vec![]));
+            }
+            if op == crate::edit::Op::TimeStretch {
+                let r = row(
+                    vec![t("Ratio:"), f(Field::EditRatio, format!("{:.1}%", ratio as f32 / 10.0))],
+                    vec![t("of the length, same pitch")],
+                );
+                rows.push(r);
             }
             msg(&mut rows);
             rows

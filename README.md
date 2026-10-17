@@ -272,6 +272,7 @@ Every point moves by 1/500 of the sound per DATA wheel step, or by single frames
 | DELETE SECTION        | Cuts the section out                                           |
 | SILENCE SECTION       | Makes the section silent                                       |
 | REVERSE SECTION       | Plays the section backwards                                    |
+| TIME STRETCH          | Puts the section on `To pad` made longer or shorter at the same pitch: `Ratio` is the new length, 50–200 % (1 % a step, 0.1 % with Shift) |
 | NORMALIZE SECTION     | Raises the section until its loudest point is at full level    |
 | SLICE SOUND (ZONE)    | Puts every zone on its own pad, from `To pad` on               |
 
@@ -279,6 +280,9 @@ Every point moves by 1/500 of the sound per DATA wheel step, or by single frames
 (`KICK-1`, `KICK-2`, …) and their pads start from the default settings. To chop a break onto 16
 pads: load it on a pad, go to ZONE, set `Zones` to 16, fix the boundaries by ear with PLAY X, then
 EDIT, SLICE SOUND, `To pad` B01, DO IT. Edits cannot be undone, as on the MPC.
+
+To fit a loop to the sequence tempo, stretch it by the old tempo over the new: a 90 BPM break in a
+95 BPM sequence needs 90 / 95 = 94.7 %.
 
 ### Loading samples
 
@@ -405,7 +409,7 @@ shows the version and the output sample rate.
 
 - Windows-specific testing
 - The MISC mode
-- TIME STRETCH and INSERT SOUND in the EDIT window
+- INSERT SOUND in the EDIT window
 - The filter envelope in PROGRAM
 - Loading the MPC's `.SEQ`, `.APS` and `.ALL` files; its `.SND` sounds, `.PGM` programs and
   `.MID` sequences already load

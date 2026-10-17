@@ -16,14 +16,25 @@ pub enum Op {
     Delete,
     Silence,
     Reverse,
+    /// A new sound of the section played longer or shorter at the same pitch, on `To pad`.
+    TimeStretch,
     Normalize,
     /// Every zone to its own pad (ZONE only).
     Slice,
 }
 
 impl Op {
-    pub const ALL: [Op; 8] =
-        [Op::Discard, Op::LoopStEnd, Op::NewSound, Op::Delete, Op::Silence, Op::Reverse, Op::Normalize, Op::Slice];
+    pub const ALL: [Op; 9] = [
+        Op::Discard,
+        Op::LoopStEnd,
+        Op::NewSound,
+        Op::Delete,
+        Op::Silence,
+        Op::Reverse,
+        Op::TimeStretch,
+        Op::Normalize,
+        Op::Slice,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -33,6 +44,7 @@ impl Op {
             Op::Delete => "DELETE SECTION",
             Op::Silence => "SILENCE SECTION",
             Op::Reverse => "REVERSE SECTION",
+            Op::TimeStretch => "TIME STRETCH",
             Op::Normalize => "NORMALIZE SECTION",
             Op::Slice => "SLICE SOUND",
         }
@@ -40,7 +52,7 @@ impl Op {
 
     /// Whether the operation puts sounds on other pads, chosen with `To pad`.
     pub fn makes_sounds(self) -> bool {
-        matches!(self, Op::NewSound | Op::Slice)
+        matches!(self, Op::NewSound | Op::Slice | Op::TimeStretch)
     }
 }
 
@@ -81,7 +93,7 @@ pub fn apply(snd: &mut Sound, op: Op, section: Range<usize>) {
                 frames[section].iter_mut().flatten().for_each(|x| *x /= peak);
             }
         }
-        Op::NewSound | Op::Slice => return,
+        Op::NewSound | Op::Slice | Op::TimeStretch => return,
     }
     let len = frames.len().max(1);
     snd.end = snd.end.clamp(1, len);
@@ -95,6 +107,46 @@ pub fn section(snd: &Sound, section: Range<usize>, name: String) -> Sound {
     let end = section.end.min(snd.frames.len());
     let start = section.start.min(end);
     Sound::new(name, snd.frames[start..end].to_vec().into())
+}
+
+/// Time stretching by WSOLA: overlapping windows of the input are laid out at a new spacing, each
+/// shifted by up to a few milliseconds to where it lines up best with the audio before it, so the
+/// pitch stays and there are no phase jumps. `ratio` is the new length over the old, 0.5..=2.
+pub fn stretch(x: &[[f32; 2]], ratio: f64, rate: u32) -> Vec<[f32; 2]> {
+    let win = (rate as usize * 40 / 1000).max(16) & !1;
+    let hop = win / 2;
+    let tolerance = rate as usize * 8 / 1000;
+    let out_len = (x.len() as f64 * ratio).round() as usize;
+    if x.len() < win * 2 || out_len < win {
+        // Too short to stretch: plain resampling would change the pitch, so keep it as it is.
+        return x.to_vec();
+    }
+    let mono = |i: usize| x.get(i).map_or(0.0, |f| f[0] + f[1]);
+    let hann: Vec<f32> = (0..win).map(|i| (std::f32::consts::PI * i as f32 / win as f32).sin().powi(2)).collect();
+    let mut out = vec![[0.0f32; 2]; out_len + win];
+    // Where the previous window's continuation is in the input.
+    let mut natural = 0usize;
+    for k in 0..=out_len / hop {
+        let nominal = (k as f64 * hop as f64 / ratio) as usize;
+        let pos = if k == 0 {
+            0
+        } else {
+            // ponytail: correlates every 4th sample to stay fast; full resolution if it ever smears.
+            let lo = nominal.saturating_sub(tolerance);
+            let hi = (nominal + tolerance).min(x.len().saturating_sub(win));
+            let score = |p: usize| (0..win).step_by(4).map(|i| mono(p + i) * mono(natural + i)).sum::<f32>();
+            (lo..=hi.max(lo)).map(|p| (p, score(p))).max_by(|a, b| a.1.total_cmp(&b.1)).map_or(nominal, |(p, _)| p)
+        };
+        for i in 0..win {
+            let Some(f) = x.get(pos + i) else { break };
+            let o = &mut out[k * hop + i];
+            o[0] += f[0] * hann[i];
+            o[1] += f[1] * hann[i];
+        }
+        natural = pos + hop;
+    }
+    out.truncate(out_len);
+    out
 }
 
 /// Zones split a sound into `count` equal, back-to-back parts: zone `i` runs from `bounds[i]` to
@@ -152,6 +204,28 @@ mod tests {
         s.start = 2;
         apply(&mut s, Op::LoopStEnd, 2..6);
         assert_eq!((s.loop_to, s.looping), (2, true));
+    }
+
+    #[test]
+    fn stretch_keeps_pitch_and_changes_length() {
+        let rate = 8_000;
+        // One second of 200 Hz.
+        let tone: Vec<[f32; 2]> = (0..rate)
+            .map(|i| (i as f32 * 200.0 * std::f32::consts::TAU / rate as f32).sin() * 0.5)
+            .map(|v| [v, v])
+            .collect();
+        for ratio in [0.5, 1.5] {
+            let out = stretch(&tone, ratio, rate as u32);
+            assert_eq!(out.len(), (rate as f64 * ratio) as usize);
+            // Count rising zero crossings in the middle: still 200 per second.
+            let mid = &out[out.len() / 4..out.len() * 3 / 4];
+            let rises = mid.windows(2).filter(|w| w[0][0] < 0.0 && w[1][0] >= 0.0).count() as f64;
+            let hz = rises / (mid.len() as f64 / rate as f64);
+            assert!((hz - 200.0).abs() < 6.0, "ratio {ratio}: {hz} Hz");
+            // No dropouts or overshoot from the overlapping windows.
+            let peak = mid.iter().fold(0.0f32, |m, f| m.max(f[0].abs()));
+            assert!(peak > 0.45 && peak < 0.55, "ratio {ratio}: peak {peak}");
+        }
     }
 
     #[test]
