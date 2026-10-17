@@ -267,6 +267,9 @@ EDIT, SLICE SOUND, `To pad` B01, DO IT. Edits cannot be undone, as on the MPC.
 4. **Enter**, **→**, **ENTER** or **F6** opens a folder, or loads the sound into the pad and plays it.
 5. **Backspace**, **←** or **F1** goes up a folder.
 
+**PLAY** (F5) listens to the selected WAV or `.SND` file without loading it; **STOP** or leaving
+the screen stops it.
+
 WAV files of any bit depth and sample rate work, mono or stereo. The MPC2000XL's own `.SND`
 sounds load too, with their trim points, loop and tuning, so old MPC sound libraries can be used
 directly.

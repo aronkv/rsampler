@@ -28,6 +28,8 @@ pub enum Hit {
         pad: u8,
         range: std::ops::Range<usize>,
     },
+    /// Stops PLAY X and LOAD's PLAY.
+    StopAudition,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -116,6 +118,8 @@ pub struct Shared {
     pub midi_out: Option<mpsc::Sender<[u8; 3]>>,
     /// Velocity of pads hit from the computer keyboard.
     pub key_velocity: u8,
+    /// A sound file to listen to from the LOAD screen, consumed by the audio callback.
+    pub preview: Option<Sound>,
 }
 
 impl Shared {
@@ -155,6 +159,7 @@ impl Shared {
             rate,
             midi_out: None,
             key_velocity: 101,
+            preview: None,
         }
     }
 
@@ -229,6 +234,7 @@ impl Shared {
     }
 
     pub fn stop(&mut self) {
+        self.hits.push(Hit::StopAudition);
         self.t.song = None;
         if !self.t.playing {
             // Pressing STOP while stopped returns to the start, like the hardware.
@@ -542,6 +548,7 @@ impl Shared {
                     voices.audition(sound, range);
                 }
             }
+            Hit::StopAudition => voices.cut(AUDITION),
             Hit::Release { pad } => {
                 self.t.held[pad as usize] = None;
                 self.t.erasing[pad as usize] = false;
@@ -619,6 +626,10 @@ impl Engine {
                 let mut s = lock(&shared);
                 for hit in std::mem::take(&mut s.hits) {
                     s.handle_hit(hit, &mut voices);
+                }
+                if let Some(sound) = s.preview.take() {
+                    let len = sound.frames.len();
+                    voices.audition(&sound, 0..len);
                 }
                 for frame in out.chunks_mut(channels) {
                     s.advance(&mut voices);

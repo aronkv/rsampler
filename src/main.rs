@@ -354,6 +354,7 @@ impl App {
     fn set_screen(&mut self, screen: Screen) {
         if let Screen::Load(b) | Screen::Save(b) = &self.screen {
             self.load_dir = b.dir.clone();
+            self.with(|s| s.hits.push(Hit::StopAudition));
         }
         self.screen = screen;
         if !matches!(self.screen, Screen::Sample) {
@@ -900,17 +901,8 @@ impl App {
             return self.import_midi(path);
         }
         let pad = self.pad;
-        let rate = self.with(|s| s.rate);
         let is_snd = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("snd"));
-        let loaded = if is_snd {
-            snd::load(&path, rate)
-        } else {
-            audio::load_wav(&path, rate).map_err(|e| e.to_string()).map(|frames| {
-                let name = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-                (Sound::new(name, frames), 0)
-            })
-        };
-        match loaded {
+        match self.read_sound(&path) {
             Ok((sound, _)) if sound.frames.is_empty() => self.say("Empty file"),
             Ok((sound, tune)) => {
                 self.with(|s| {
@@ -928,6 +920,33 @@ impl App {
     }
 
     /// A MIDI file replaces the current sequence (UNDO SEQ brings it back), after a second ENTER.
+    /// A WAV or `.SND` file as a sound at the output rate, with the `.SND`'s own tuning.
+    fn read_sound(&self, path: &std::path::Path) -> Result<(Sound, i32), String> {
+        let rate = self.with(|s| s.rate);
+        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("snd")) {
+            snd::load(path, rate)
+        } else {
+            audio::load_wav(path, rate).map_err(|e| e.to_string()).map(|frames| {
+                let name = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+                (Sound::new(name, frames), 0)
+            })
+        }
+    }
+
+    /// LOAD's PLAY: listens to the selected sound file without loading it.
+    fn preview(&mut self) {
+        let Screen::Load(b) = &self.screen else { return };
+        let Some(path) = b.entries.get(b.cursor).cloned() else { return };
+        let sound = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav") || e.eq_ignore_ascii_case("snd"));
+        if !sound {
+            return self.say("PLAY works on WAV and SND files");
+        }
+        match self.read_sound(&path) {
+            Ok((sound, _)) => self.with(|s| s.preview = Some(sound)),
+            Err(e) => self.say(e),
+        }
+    }
+
     fn import_midi(&mut self, path: PathBuf) {
         if self.confirm.as_ref() != Some(&path) {
             self.say("Replaces this sequence. ENTER again to load");
@@ -1189,6 +1208,7 @@ impl App {
             (Screen::Main, 5) => self.with(|s| s.t.track = (s.t.track + 1).min(seq::TRACKS - 1)),
             (Screen::Load(_) | Screen::Save(_), 0) => self.parent_dir(),
             (Screen::Load(_), 1) => self.open_save(),
+            (Screen::Load(_), 4) => self.preview(),
             (Screen::Load(_), 5) => self.enter(),
             (Screen::Save(_), 1) => self.export(Export::SongWav),
             (Screen::Save(_), 2) => self.export(Export::Wav),
