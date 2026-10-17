@@ -253,13 +253,19 @@ pad hits. Most 16-pad controllers send 36–51 by default, which lands on bank A
 set to a channel sends its notes there as it plays (pad A01 = note 36 again), and pads you hit pass
 through on the selected track's channel, so the pads can play an external synth.
 
-**Clock:** with `MIDI clock out` on in SETUP, rsampler sends MIDI clock while playing, and start,
-stop, or song position and continue, so a DAW or drum machine can follow its tempo.
+**Clock out:** with `MIDI clock out` on in SETUP, rsampler sends MIDI clock while playing, and
+start, stop, or song position and continue, so a DAW or drum machine can follow its tempo.
+
+**Clock in:** with `Sync` set to MIDI CLOCK in SETUP, rsampler follows another device instead: it
+starts, stops and locates when the master does, plays at the master's tempo (shown as `EXT` on the
+MAIN screen and in SETUP) and stays locked to its clock pulses. PLAY on rsampler itself is disabled
+while syncing; STOP still works.
 
 ### SETUP and OTHER
 
-The blue **7 / SETUP** key (`Ctrl+7`) holds `MIDI clock out` and the velocity of pads hit from the
-computer keyboard (101 by default); both are saved with the project. **9 / OTHER** (`Ctrl+9`)
+The blue **7 / SETUP** key (`Ctrl+7`) holds `MIDI clock out`, `Sync` (INTERNAL or MIDI CLOCK) and
+the velocity of pads hit from the computer keyboard (101 by default); all are saved with the
+project. **9 / OTHER** (`Ctrl+9`)
 shows the version and the output sample rate.
 
 ### Keyboard shortcuts
@@ -283,7 +289,7 @@ shows the version and the output sample rate.
 
 ### Not there yet
 
-- Following an external MIDI clock, and MIDI output on Windows
+- MIDI output on Windows
 - Windows-specific testing
 - The MISC mode
 - Loading the MPC's own file formats

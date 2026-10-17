@@ -443,6 +443,7 @@ impl App {
             }
             Field::SampleMode => return self.sample_mono ^= true,
             Field::ClockOut => return self.with(|s| s.t.clock_out ^= true),
+            Field::Sync => return self.with(|s| s.t.sync ^= true),
             Field::KeyVelocity => {
                 return self.with(|s| s.key_velocity = (s.key_velocity as i32 + d).clamp(1, 127) as u8);
             }
@@ -550,6 +551,7 @@ impl App {
                 | Field::VarParam
                 | Field::TrackOut
                 | Field::ClockOut
+                | Field::Sync
                 | Field::KeyVelocity => {}
             }
         });
@@ -838,6 +840,9 @@ impl App {
     /// PLAY / PLAY START. On the SONG screen they play the song, from the selected step or the
     /// first one.
     fn play(&mut self, from_start: bool) {
+        if self.with(|s| s.t.sync) {
+            return self.say("Sync is MIDI CLOCK: start from the master");
+        }
         if matches!(self.screen, Screen::Song) {
             let step = if from_start { 0 } else { self.song_step };
             if !self.with(|s| s.play_song(step)) && !self.with(|s| s.t.playing) {

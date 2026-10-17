@@ -117,6 +117,7 @@ pub enum Field {
     VarParam,
     TrackOut,
     ClockOut,
+    Sync,
     KeyVelocity,
 }
 
@@ -230,7 +231,14 @@ pub fn rows(v: &View) -> Vec<Row> {
                 row(
                     vec![
                         t("Tempo:"),
-                        f(Field::Tempo, format!("{:5.1}", seq.tempo)),
+                        f(
+                            Field::Tempo,
+                            match (s.t.sync, s.t.ext.tempo()) {
+                                (true, Some(ext)) => format!("{ext:5.1} EXT"),
+                                (true, None) => "  EXT".to_owned(),
+                                _ => format!("{:5.1}", seq.tempo),
+                            },
+                        ),
                         t("  Timing:"),
                         f(Field::Timing, TIMING[s.t.timing].0),
                         t("  Swing:"),
@@ -321,6 +329,14 @@ pub fn rows(v: &View) -> Vec<Row> {
             let mut rows = vec![
                 row(vec![t("SETUP")], vec![]),
                 row(vec![t("MIDI clock out:"), f(Field::ClockOut, on_off(s.t.clock_out))], vec![]),
+                row(
+                    vec![t("Sync:"), f(Field::Sync, if s.t.sync { "MIDI CLOCK" } else { "INTERNAL" })],
+                    vec![t(match (s.t.sync, s.t.ext.tempo()) {
+                        (true, Some(tempo)) => format!("In: {tempo:.1} BPM"),
+                        (true, None) => "No clock yet".to_owned(),
+                        _ => String::new(),
+                    })],
+                ),
                 row(vec![t("Keyboard pad velocity:"), f(Field::KeyVelocity, s.key_velocity.to_string())], vec![]),
                 row(
                     vec![t(if s.midi_out.is_some() { "MIDI out port: rsampler" } else { "MIDI out: not available" })],

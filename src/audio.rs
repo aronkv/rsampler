@@ -61,8 +61,27 @@ pub struct Transport {
     pub song: Option<(usize, u32)>,
     /// Send MIDI clock, start and stop.
     pub clock_out: bool,
+    /// Follow an external MIDI clock instead of the sequence tempo.
+    pub sync: bool,
+    pub ext: ExtClock,
     /// MIDI notes sent from the sequence that still need their note off: status, note, tick.
     midi_offs: Vec<(u8, u8, u32)>,
+}
+
+/// State of an incoming MIDI clock.
+#[derive(Default)]
+pub struct ExtClock {
+    /// Smoothed time between clock pulses, in microseconds; 0 until two pulses arrived.
+    interval_us: f64,
+    last_us: Option<u64>,
+    /// Position of the last pulse; playback may run at most one pulse (4 ticks) past it.
+    clock_tick: f64,
+}
+
+impl ExtClock {
+    pub fn tempo(&self) -> Option<f32> {
+        (self.interval_us > 0.0).then(|| (60e6 / (self.interval_us * 24.0)) as f32)
+    }
 }
 
 /// Song mode: sequences played in order, each repeated a number of times.
@@ -116,6 +135,8 @@ impl Shared {
                 undo: None,
                 song: None,
                 clock_out: false,
+                sync: false,
+                ext: ExtClock::default(),
                 midi_offs: Vec::new(),
             },
             master: 0.8,
@@ -373,7 +394,10 @@ impl Shared {
         while self.t.next_tick as f64 <= self.t.tick {
             let tick = self.t.next_tick;
             if tick >= self.seq().len() as i64 {
+                let before = self.t.tick;
                 self.end_of_sequence();
+                // Wrapping moves the playhead back; the external clock's position moves with it.
+                self.t.ext.clock_tick -= before - self.t.tick;
                 if !self.t.playing {
                     return;
                 }
@@ -383,7 +407,63 @@ impl Shared {
             self.t.next_tick += 1;
         }
         let rate = self.rate as f64;
-        self.t.tick += self.seq().tempo as f64 * crate::seq::PPQ as f64 / 60.0 / rate;
+        let tempo = match (self.t.sync, self.t.ext.tempo()) {
+            (true, Some(ext)) => ext,
+            _ => self.seq().tempo,
+        };
+        self.t.tick += tempo as f64 * crate::seq::PPQ as f64 / 60.0 / rate;
+        if self.t.sync {
+            // Never run more than one pulse ahead of the clock; the next pulse lets it go on.
+            self.t.tick = self.t.tick.min(self.t.ext.clock_tick + 4.0);
+        }
+    }
+
+    /// MIDI real-time and song position messages, followed when `sync` is on. `stamp_us` is the
+    /// arrival time in microseconds.
+    pub fn midi_sync(&mut self, msg: &[u8], stamp_us: u64) {
+        if !self.t.sync {
+            return;
+        }
+        match *msg {
+            [0xF8] => {
+                let ext = &mut self.t.ext;
+                if let Some(last) = ext.last_us {
+                    let dt = stamp_us.saturating_sub(last) as f64;
+                    // Ignore gaps, such as the pause before a start.
+                    if dt > 0.0 && dt < 250_000.0 {
+                        ext.interval_us = if ext.interval_us == 0.0 { dt } else { ext.interval_us * 0.9 + dt * 0.1 };
+                    }
+                }
+                ext.last_us = Some(stamp_us);
+                if self.t.playing {
+                    ext.clock_tick += 4.0;
+                    // Behind the clock: catch up; the skipped ticks still play.
+                    self.t.tick = self.t.tick.max(ext.clock_tick);
+                }
+            }
+            [0xFA] => {
+                self.locate(0);
+                self.start_synced();
+            }
+            [0xFB] => self.start_synced(),
+            [0xFC] => self.stop(),
+            [0xF2, lsb, msb] if !self.t.playing => {
+                let sixteenths = (lsb as u32 & 0x7F) | (msb as u32 & 0x7F) << 7;
+                self.locate(sixteenths * 24);
+            }
+            _ => {}
+        }
+    }
+
+    /// Starts on an external start or continue: no count-in, and the first pulse marks `Now`.
+    fn start_synced(&mut self) {
+        if self.t.playing {
+            return;
+        }
+        let count_in = std::mem::replace(&mut self.t.count_in, false);
+        self.play(false);
+        self.t.count_in = count_in;
+        self.t.ext.clock_tick = self.t.tick - 4.0;
     }
 
     fn end_of_sequence(&mut self) {
@@ -894,6 +974,35 @@ mod tests {
         s.play(false);
         let msgs: Vec<[u8; 3]> = rx.try_iter().collect();
         assert_eq!(msgs, [[0xF2, 200 & 0x7F, 1], [0xFB, 0, 0]]);
+    }
+
+    #[test]
+    fn external_clock_drives_tempo_and_position() {
+        let (mut s, mut v) = with_kit(48_000);
+        s.t.sync = true;
+        s.seqs[0].tempo = 120.0;
+        s.seqs[0].tracks[0].insert(Note { tick: 48, pad: 0, velocity: 100, duration: 10, var: None });
+        // 90 BPM: 24 pulses per beat, one every 27 777 µs (1333 frames at 48 kHz).
+        let pulse_us = 60_000_000 / (90 * 24);
+        let mut stamp = 1_000_000;
+        s.midi_sync(&[0xFA], stamp);
+        assert!(s.t.playing);
+        for _ in 0..12 {
+            s.midi_sync(&[0xF8], stamp);
+            run(&mut s, &mut v, 1333);
+            stamp += pulse_us;
+        }
+        // Twelve pulses are 48 ticks; playback is held at most one pulse ahead.
+        assert!((44.0..=52.0).contains(&s.t.tick), "tick {}", s.t.tick);
+        assert!((s.t.ext.tempo().unwrap() - 90.0).abs() < 0.5);
+        // Without pulses the playhead stops at one pulse past the last one.
+        run(&mut s, &mut v, 48_000);
+        assert!(s.t.tick <= 48.0);
+        s.midi_sync(&[0xFC], stamp);
+        assert!(!s.t.playing);
+        // Song position: 8 sixteenths in.
+        s.midi_sync(&[0xF2, 8, 0], stamp);
+        assert_eq!(s.now(), 192);
     }
 
     #[test]

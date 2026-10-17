@@ -35,7 +35,8 @@ impl Midi {
         let virtual_port = {
             use midir::os::unix::VirtualInput;
             let shared = shared.clone();
-            input().and_then(|i| i.create_virtual("rsampler", move |_, msg, _| forward(&shared, msg), ()).ok())
+            input()
+                .and_then(|i| i.create_virtual("rsampler", move |stamp, msg, _| forward(&shared, stamp, msg), ()).ok())
         };
         #[cfg(not(unix))]
         let virtual_port = None;
@@ -61,7 +62,7 @@ impl Midi {
             }
             let shared = self.shared.clone();
             let Some(input) = input() else { break };
-            if let Ok(conn) = input.connect(&port, "rsampler", move |_, msg, _| forward(&shared, msg), ()) {
+            if let Ok(conn) = input.connect(&port, "rsampler", move |stamp, msg, _| forward(&shared, stamp, msg), ()) {
                 added.push(name.clone());
                 self.connections.push((name, conn));
             }
@@ -93,13 +94,16 @@ pub fn start_out() -> Option<mpsc::Sender<[u8; 3]>> {
 
 fn input() -> Option<MidiInput> {
     let mut input = MidiInput::new("rsampler").ok()?;
-    input.ignore(Ignore::All);
+    // Clock and transport messages are needed for sync.
+    input.ignore(Ignore::SysexAndActiveSense);
     Some(input)
 }
 
-fn forward(shared: &Mutex<Shared>, msg: &[u8]) {
+fn forward(shared: &Mutex<Shared>, stamp_us: u64, msg: &[u8]) {
     if let Some(hit) = parse(msg) {
         lock(shared).hits.push(hit);
+    } else if matches!(msg.first(), Some(0xF2 | 0xF8 | 0xFA | 0xFB | 0xFC)) {
+        lock(shared).midi_sync(msg, stamp_us);
     }
 }
 

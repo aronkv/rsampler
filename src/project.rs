@@ -35,11 +35,13 @@ struct ProjectFile {
 struct SetupFile {
     clock_out: bool,
     key_velocity: u8,
+    #[serde(default)]
+    sync: bool,
 }
 
 impl Default for SetupFile {
     fn default() -> Self {
-        Self { clock_out: false, key_velocity: 101 }
+        Self { clock_out: false, key_velocity: 101, sync: false }
     }
 }
 
@@ -214,7 +216,7 @@ fn describe(s: &Shared) -> ProjectFile {
             steps: s.song.steps.iter().map(|&(seq, reps)| [seq as u32, reps]).collect(),
             looping: s.song.looping,
         },
-        setup: SetupFile { clock_out: s.t.clock_out, key_velocity: s.key_velocity },
+        setup: SetupFile { clock_out: s.t.clock_out, key_velocity: s.key_velocity, sync: s.t.sync },
     }
 }
 
@@ -380,6 +382,7 @@ impl Loaded {
         s.t.count_in = file.count_in;
         s.t.click = file.click;
         s.t.clock_out = file.setup.clock_out;
+        s.t.sync = file.setup.sync;
         s.key_velocity = file.setup.key_velocity.clamp(1, 127);
         s.t.seq = 0;
         s.t.track = 0;
