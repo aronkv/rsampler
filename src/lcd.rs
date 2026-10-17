@@ -22,15 +22,16 @@ impl Browser {
             .flatten()
             .flatten()
             .map(|e| e.path())
-            .filter(|p| visible(p) && (p.is_dir() || (wavs && is_wav(p))))
+            .filter(|p| visible(p) && (p.is_dir() || (wavs && is_sound(p))))
             .collect();
         entries.sort_by_key(|p| (!p.is_dir(), p.file_name().map(|n| n.to_string_lossy().to_lowercase())));
         Self { dir, entries, cursor: 0 }
     }
 }
 
-fn is_wav(path: &Path) -> bool {
-    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav"))
+/// WAV files, and the MPC2000XL's own .SND sounds.
+fn is_sound(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav") || e.eq_ignore_ascii_case("snd"))
 }
 
 pub enum Screen {

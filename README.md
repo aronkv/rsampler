@@ -201,10 +201,12 @@ The blue **5 / TRIM** key shows the selected pad's waveform. `St` and `End` set 
 1. Hit the pad you want to load into.
 2. Press **LOAD** (the blue `3` key). The browser opens in `~/Music`.
 3. Move with the arrow keys or the **DATA** wheel.
-4. **Enter**, **→**, **ENTER** or **F6** opens a folder, or loads the WAV file into the pad and plays it.
+4. **Enter**, **→**, **ENTER** or **F6** opens a folder, or loads the sound into the pad and plays it.
 5. **Backspace**, **←** or **F1** goes up a folder.
 
-WAV files of any bit depth and sample rate work, mono or stereo.
+WAV files of any bit depth and sample rate work, mono or stereo. The MPC2000XL's own `.SND`
+sounds load too, with their trim points and tuning, so old MPC sound libraries can be used
+directly.
 
 ### SAMPLE: recording from the input
 
@@ -292,7 +294,8 @@ shows the version and the output sample rate.
 - MIDI output on Windows
 - Windows-specific testing
 - The MISC mode
-- Loading the MPC's own file formats
+- Loading the MPC's program, sequence and ALL files (`.PGM`, `.SEQ`, `.APS`, `.ALL`); its `.SND`
+  sounds already load
 - Windows builds
 
 ## Reference
