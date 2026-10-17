@@ -147,8 +147,17 @@ correct) quantizes a whole track afterwards.
 
 **UNDO SEQ** (`Ctrl+Z`) takes back the last recording or edit; its light shows that it can.
 Hold **ERASE** (or `Delete`) while playing and hold pads to delete their notes as the playhead
-passes. **TR.ON** (F3) and **TRACK MUTE** mute the track, **SOLO** (F4) plays only this track,
-**TR -** / **TR +** (F5/F6) change track and **NEXT SEQ** queues the next sequence.
+passes. **TR.ON** (F3) mutes the track, **SOLO** (F4) plays only this track, and **TR -** / **TR +**
+(F5/F6) change track.
+
+**TRACK MUTE** (`F10`) turns the pads into track switches, for muting parts live: pad 1 mutes or
+unmutes track 1, and so on, with PAD BANK B–D for tracks 17–64. The LCD shows the tracks laid out
+like the pads, `*` marking those with notes. **SOLO** (F6) and then a pad plays only that track;
+SOLO again brings all tracks back.
+
+**NEXT SEQ** (`F9`) does the same for sequences: while playing, a pad queues its sequence (pad 1 =
+sequence 1, bank B = 17–32, …) to start when the current one ends; while stopped it selects it.
+Press either key again to go back to MAIN.
 
 **NOTE REPEAT**: while playing, hold **TAP TEMPO / NOTE REPEAT** (or `T`) and hold pads; they play
 again on every `Timing` grid line (1/16 when `Timing` is OFF) and are recorded when recording.
@@ -373,6 +382,7 @@ shows the version and the output sample rate.
 | `F1`–`F6`                   | Soft keys                    |
 | `F7` / `F8`                 | FULL LEVEL / 16 LEVELS       |
 | `Tab` / `Shift+Tab`         | Next / previous PAD BANK     |
+| `F9` / `F10`                | NEXT SEQ / TRACK MUTE        |
 | `Ctrl+1` / `3`–`9`          | SONG / LOAD, SAMPLE, TRIM, PROGRAM, SETUP, MIXER, OTHER |
 | `Esc`                       | MAIN SCREEN                  |
 

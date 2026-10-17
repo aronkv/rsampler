@@ -55,6 +55,12 @@ pub enum Screen {
     Assign,
     /// 16 LEVELS assign.
     Levels,
+    /// TRACK MUTE: the pads mute tracks; `solo` while SOLO waits for a pad.
+    TrMute {
+        solo: bool,
+    },
+    /// NEXT SEQ: the pads pick the next sequence.
+    NextSeq,
     Setup,
     Other,
 }
@@ -103,7 +109,10 @@ impl Screen {
             Screen::Edit(_) => ["", "", "", "CANCEL", "DO IT", ""],
             Screen::Sample => ["", "", "", "", "", "REC"],
             Screen::Song => ["INSERT", "DELETE", "", "", "", ""],
-            Screen::Assign | Screen::Levels | Screen::Setup | Screen::Other => ["", "", "", "", "", ""],
+            Screen::Assign | Screen::Levels | Screen::NextSeq | Screen::Setup | Screen::Other => {
+                ["", "", "", "", "", ""]
+            }
+            Screen::TrMute { .. } => ["", "", "", "", "", "SOLO"],
         }
     }
 
@@ -280,6 +289,8 @@ pub struct View<'a> {
     /// EDIT: the operation and the pad new sounds go to.
     pub edit: (crate::edit::Op, usize),
     pub seq_edit: &'a SeqEdit,
+    /// Selected PAD BANK, 0..4.
+    pub bank: usize,
     /// 16 LEVELS: the pad, NOTE VAR's parameter (None = VELOCITY), and the original-key pad.
     pub levels: (usize, Option<crate::program::VarParam>, usize),
 }
@@ -461,6 +472,72 @@ pub fn rows(v: &View) -> Vec<Row> {
                 row(vec![t("github.com/aronkv/rsampler")], vec![]),
             ];
             msg(&mut rows);
+            rows
+        }
+        Screen::TrMute { solo } => {
+            let base = v.bank * 16;
+            let mut rows = vec![row(
+                vec![t(format!("TRACK MUTE  Sq:{:02}  Bank:{}", s.t.seq + 1, ["A", "B", "C", "D"][v.bank]))],
+                vec![t(s.seq().bbt(s.now()))],
+            )];
+            // Laid out like the pads: tracks 13–16 on top.
+            for r in (0..4).rev() {
+                let cells = (0..4)
+                    .map(|c| {
+                        let tr = base + r * 4 + c;
+                        let state = match s.t.solo {
+                            Some(x) if x == tr => "SOLO",
+                            Some(_) => "  --",
+                            None if s.seq().tracks[tr].on => "  ON",
+                            None => " off",
+                        };
+                        let used = if s.seq().tracks[tr].notes.is_empty() { ' ' } else { '*' };
+                        format!("{:02}{used}{state}", tr + 1)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("   ");
+                rows.push(row(vec![t(cells)], vec![]));
+            }
+            let hint = match (solo, s.t.solo) {
+                (true, _) => "Hit the pad of the track to solo",
+                (false, Some(_)) => "SOLO: back to all tracks",
+                _ if v.message.is_empty() => "Pads mute tracks (* has notes)",
+                _ => v.message,
+            };
+            rows.push(row(vec![t(hint)], vec![t(status(s))]));
+            rows
+        }
+        Screen::NextSeq => {
+            let base = v.bank * 16;
+            let next = s.t.next_seq.map_or("--".to_owned(), |n| format!("{:02}", n + 1));
+            let mut rows = vec![row(
+                vec![t(format!("NEXT SEQ  Sq:{:02}  Next:{next}", s.t.seq + 1))],
+                vec![t(s.seq().bbt(s.now()))],
+            )];
+            for r in (0..4).rev() {
+                let cells = (0..4)
+                    .map(|c| {
+                        let sq = base + r * 4 + c;
+                        let used = s.seqs[sq].tracks.iter().any(|t| !t.notes.is_empty());
+                        let mark = if sq == s.t.seq {
+                            '<'
+                        } else if Some(sq) == s.t.next_seq {
+                            '>'
+                        } else if used {
+                            '*'
+                        } else {
+                            ' '
+                        };
+                        format!("Sq{:02}{mark}", sq + 1)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("    ");
+                rows.push(row(vec![t(cells)], vec![]));
+            }
+            msg(&mut rows);
+            if rows[5].left[0].text.is_empty() {
+                rows[5].left[0].text = "Pads pick the next sequence".to_owned();
+            }
             rows
         }
         Screen::Levels => {

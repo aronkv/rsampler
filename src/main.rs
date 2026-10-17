@@ -172,6 +172,8 @@ enum Action {
     Bank(i32),
     FullLevel,
     SixteenLevels,
+    NextSeq,
+    TrackMute,
 }
 
 impl App {
@@ -270,6 +272,23 @@ impl App {
     }
 
     fn pad_press(&mut self, n: usize, velocity: u8) {
+        // In TRACK MUTE and NEXT SEQ the pads choose tracks and sequences instead of playing.
+        let target = self.bank * 16 + n;
+        match self.screen {
+            Screen::TrMute { solo } => {
+                self.with(|s| {
+                    if solo {
+                        s.t.solo = if s.t.solo == Some(target) { None } else { Some(target) };
+                    } else {
+                        s.seq_mut().tracks[target].on ^= true;
+                    }
+                });
+                self.screen = Screen::TrMute { solo: false };
+                return;
+            }
+            Screen::NextSeq => return self.with(|s| s.select_seq(target)),
+            _ => {}
+        }
         let velocity = if self.full_level { 127 } else { velocity };
         let (pad, velocity, levels) = if self.sixteen_levels {
             let (velocity, var) = sixteen_levels(n, velocity, self.levels_var, self.levels_key);
@@ -347,6 +366,9 @@ impl App {
     }
 
     fn pad_release(&mut self, n: usize) {
+        if matches!(self.screen, Screen::TrMute { .. } | Screen::NextSeq) {
+            return;
+        }
         let pad = self.sent[n];
         self.with(|s| s.hits.push(Hit::Release { pad }));
     }
@@ -383,6 +405,7 @@ impl App {
             edit: (self.edit_op, self.edit_to),
             seq_edit: &self.seq_edit,
             levels: (self.levels_pad, self.levels_var, self.levels_key),
+            bank: self.bank,
             sample: self.input.as_ref().map(|input| {
                 let c = input.lock();
                 lcd::SampleView {
@@ -1209,6 +1232,12 @@ impl App {
             (Screen::Load(_) | Screen::Save(_), 0) => self.parent_dir(),
             (Screen::Load(_), 1) => self.open_save(),
             (Screen::Load(_), 4) => self.preview(),
+            // SOLO: the next pad solos its track; with a track soloed it goes back to all.
+            (Screen::TrMute { .. }, 5) => {
+                if self.with(|s| s.t.solo.take().is_none()) {
+                    self.screen = Screen::TrMute { solo: true };
+                }
+            }
             (Screen::Load(_), 5) => self.enter(),
             (Screen::Save(_), 1) => self.export(Export::SongWav),
             (Screen::Save(_), 2) => self.export(Export::Wav),
@@ -1387,6 +1416,12 @@ impl App {
         }
     }
 
+    /// NEXT SEQ and TRACK MUTE open their screen, or go back to MAIN when it is already open.
+    fn toggle_mode(&mut self, screen: Screen) {
+        let open = std::mem::discriminant(&self.screen) == std::mem::discriminant(&screen);
+        self.set_screen(if open { Screen::Main } else { screen });
+    }
+
     fn set_bank(&mut self, bank: usize) {
         self.bank = bank;
         if matches!(self.screen, Screen::Mixer) {
@@ -1478,6 +1513,8 @@ impl App {
             Action::Bank(d) => self.set_bank((self.bank as i32 + d).rem_euclid(4) as usize),
             Action::FullLevel => self.full_level ^= true,
             Action::SixteenLevels => self.toggle_sixteen_levels(),
+            Action::NextSeq => self.toggle_mode(Screen::NextSeq),
+            Action::TrackMute => self.toggle_mode(Screen::TrMute { solo: false }),
         }
     }
 
@@ -1546,6 +1583,8 @@ impl App {
                 Key::Tab => Action::Bank(if modifiers.shift { -1 } else { 1 }),
                 Key::F7 => Action::FullLevel,
                 Key::F8 => Action::SixteenLevels,
+                Key::F9 => Action::NextSeq,
+                Key::F10 => Action::TrackMute,
                 _ => continue,
             };
             actions.push(action);
@@ -1979,12 +2018,11 @@ impl App {
         painter.rect_filled(p.rect(568.0, 141.0, 135.0, 54.0), 2.0 * s, PANEL_INSET);
         painter.rect_filled(p.rect(568.0, 203.0, 135.0, 54.0), 2.0 * s, PANEL_INSET);
 
-        let track_on = self.with(|s| s.seq().tracks[s.t.track].on);
         let toggles = [
             (602.0, 151.0, "FULL LEVEL", self.full_level),
             (664.0, 151.0, "16 LEVELS", self.sixteen_levels),
-            (602.0, 213.0, "NEXT SEQ", false),
-            (664.0, 213.0, "TRACK MUTE", !track_on),
+            (602.0, 213.0, "NEXT SEQ", matches!(self.screen, Screen::NextSeq)),
+            (664.0, 213.0, "TRACK MUTE", matches!(self.screen, Screen::TrMute { .. })),
         ];
         for (i, (x, y, text, on)) in toggles.into_iter().enumerate() {
             p.label(painter, x, y, text, 7.0);
@@ -1993,11 +2031,8 @@ impl App {
                 match i {
                     0 => self.full_level ^= true,
                     1 => self.toggle_sixteen_levels(),
-                    2 => self.with(|s| s.select_seq((s.t.next_seq.unwrap_or(s.t.seq) + 1).min(seq::SEQUENCES - 1))),
-                    _ => self.with(|s| {
-                        let tr = s.t.track;
-                        s.seq_mut().tracks[tr].on ^= true;
-                    }),
+                    2 => self.toggle_mode(Screen::NextSeq),
+                    _ => self.toggle_mode(Screen::TrMute { solo: false }),
                 }
             }
         }
