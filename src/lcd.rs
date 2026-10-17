@@ -59,6 +59,8 @@ pub enum Screen {
     Levels,
     /// PROGRAM's VELOCITY MODULATION window.
     Velo,
+    /// The effects on the FX SEND bus.
+    Fx,
     /// TRACK MUTE: the pads mute tracks; `solo` while SOLO waits for a pad.
     TrMute {
         solo: bool,
@@ -118,7 +120,8 @@ impl Screen {
             Screen::Save(_) => ["UP DIR", "SONG", "WAV", "MIDI", "NAME", "DO IT"],
             Screen::Program => ["LOAD", "TRIM", "MIXER", "VELO", "", "CLEAR"],
             Screen::Velo => ["PROGRAM", "", "", "", "", ""],
-            Screen::Mixer => ["", "", "", "", "", "RESET"],
+            Screen::Mixer => ["STEREO", "FX SEND", "", "", "FX", "RESET"],
+            Screen::Fx => ["MIXER", "", "", "", "", ""],
             Screen::Trim | Screen::Loop | Screen::Zone => ["TRIM", "LOOP", "ZONE", "RESET", "EDIT", "PLAY X"],
             Screen::Edit(_) => ["", "", "", "CANCEL", "DO IT", ""],
             Screen::Sample => ["", "", "", "", "", "REC"],
@@ -237,6 +240,13 @@ pub enum Field {
     CopyTo,
     Bus,
     Pgm,
+    FxSend,
+    FxReverb,
+    FxSize,
+    FxDamp,
+    FxDelay,
+    FxTime,
+    FxFeedback,
 }
 
 /// The settings of the sequence EDIT screens, kept between visits like on the MPC.
@@ -329,6 +339,8 @@ pub struct View<'a> {
     /// percent.
     pub edit: (crate::edit::Op, usize, u32),
     pub seq_edit: &'a SeqEdit,
+    /// MIXER shows the FX SEND levels instead of level and pan.
+    pub mixer_fx: bool,
     /// SEQUENCE and TRACK windows: where COPY copies to.
     pub copy_to: usize,
     /// Selected PAD BANK, 0..4.
@@ -957,16 +969,52 @@ pub fn rows(v: &View) -> Vec<Row> {
                     vec![t(format!("MIXER  Bank:{}", ["A", "B", "C", "D"][v.pad / 16]))],
                     vec![t(format!("{} {}", pad_name(v.pad), sound_name(v)))],
                 ),
+                if v.mixer_fx {
+                    row(vec![t("FX send:"), f(Field::FxSend, format!("{:3}", p.fx_send))], vec![t(v.message)])
+                } else {
+                    row(
+                        vec![
+                            t("Level:"),
+                            f(Field::Level, format!("{:3}", p.level)),
+                            t("  Pan:"),
+                            f(Field::Pan, pan_text(p.pan)),
+                        ],
+                        vec![t(v.message)],
+                    )
+                },
+            ]
+        }
+        Screen::Fx => {
+            let x = &s.fx;
+            let num = |field, v: u32| f(field, format!("{v:3}"));
+            let mut rows = vec![
+                row(vec![t("EFFECTS on the FX SEND bus")], vec![]),
                 row(
                     vec![
-                        t("Level:"),
-                        f(Field::Level, format!("{:3}", p.level)),
-                        t("  Pan:"),
-                        f(Field::Pan, pan_text(p.pan)),
+                        t("Reverb  Level:"),
+                        num(Field::FxReverb, x.reverb),
+                        t("  Size:"),
+                        num(Field::FxSize, x.size),
+                        t("  Damp:"),
+                        num(Field::FxDamp, x.damp),
                     ],
-                    vec![t(v.message)],
+                    vec![],
                 ),
-            ]
+                row(
+                    vec![
+                        t("Delay   Level:"),
+                        num(Field::FxDelay, x.delay),
+                        t("  Time:"),
+                        f(Field::FxTime, format!("{:5}", crate::fx::DELAY_TIMES[x.time].0)),
+                        t("  Feedback:"),
+                        num(Field::FxFeedback, x.feedback),
+                    ],
+                    vec![],
+                ),
+                row(vec![t("Pads reach them with FX SEND on the MIXER")], vec![]),
+            ];
+            msg(&mut rows);
+            rows
         }
         Screen::Trim => {
             let secs = |frames: usize| format!("{:.3}s", frames as f32 / s.rate as f32);

@@ -4,6 +4,7 @@
 mod allfile;
 mod audio;
 mod edit;
+mod fx;
 mod lcd;
 mod midi;
 mod midifile;
@@ -153,6 +154,7 @@ struct App {
     /// The sequence or track name being typed in their window.
     name_buf: String,
     copy_to: usize,
+    mixer_fx: bool,
 }
 
 enum Export {
@@ -265,6 +267,7 @@ impl App {
             sound_undo: None,
             name_buf: String::new(),
             copy_to: 1,
+            mixer_fx: false,
             seq_edit: lcd::SeqEdit {
                 op: seq::EventOp::Copy,
                 pad: None,
@@ -429,6 +432,7 @@ impl App {
             levels: (self.levels_pad, self.levels_var, self.levels_key),
             bank: self.bank,
             copy_to: self.copy_to,
+            mixer_fx: self.mixer_fx,
             out_port: &self.midi_out.port,
             sample: self.input.as_ref().map(|input| {
                 let c = input.lock();
@@ -731,6 +735,13 @@ impl App {
                     *m = (v >= 0 && v as usize != pad).then_some(v as u8);
                 }
                 Field::Level => p.level = step(p.level, 0, 100),
+                Field::FxSend => p.fx_send = step(p.fx_send, 0, 100),
+                Field::FxReverb => s.fx.reverb = step(s.fx.reverb, 0, 100),
+                Field::FxSize => s.fx.size = step(s.fx.size, 0, 100),
+                Field::FxDamp => s.fx.damp = step(s.fx.damp, 0, 100),
+                Field::FxDelay => s.fx.delay = step(s.fx.delay, 0, 100),
+                Field::FxTime => s.fx.time = step(s.fx.time as u32, 0, fx::DELAY_TIMES.len() as u32 - 1) as usize,
+                Field::FxFeedback => s.fx.feedback = step(s.fx.feedback, 0, 95),
                 Field::VeloLevel => p.velo.level = step(p.velo.level, 0, 100),
                 Field::VeloAttack => p.velo.attack = step(p.velo.attack, 0, 100),
                 Field::VeloStart => p.velo.start = step(p.velo.start, 0, 100),
@@ -1712,10 +1723,21 @@ impl App {
                 });
                 self.song_step = sel.min(left.saturating_sub(1));
             }
-            (Screen::Mixer, 5) => self.with(|s| {
-                let p = &mut s.pads_mut()[pad];
-                (p.level, p.pan) = (100, 0);
-            }),
+            (Screen::Mixer, 0) => (self.mixer_fx, self.focus) = (false, 0),
+            (Screen::Mixer, 1) => (self.mixer_fx, self.focus) = (true, 0),
+            (Screen::Mixer, 4) => self.set_screen(Screen::Fx),
+            (Screen::Fx, 0) => self.set_screen(Screen::Mixer),
+            (Screen::Mixer, 5) => {
+                let fx = self.mixer_fx;
+                self.with(|s| {
+                    let p = &mut s.pads_mut()[pad];
+                    if fx {
+                        p.fx_send = 0;
+                    } else {
+                        (p.level, p.pan) = (100, 0);
+                    }
+                });
+            }
             (Screen::Trim | Screen::Loop | Screen::Zone, 0) => self.set_screen(Screen::Trim),
             (Screen::Trim | Screen::Loop | Screen::Zone, 1) => self.set_screen(Screen::Loop),
             (Screen::Trim | Screen::Loop | Screen::Zone, 2) => self.set_screen(Screen::Zone),
@@ -2251,21 +2273,24 @@ impl App {
             let pad = &st.pads()[bank + i];
             let x = LCD_X + 3.0 + i as f32 * w;
             let selected = bank + i == self.pad;
-            // Pan marker over the strip, level bar below it.
+            // Pan marker over the strip, level bar below it; the FX SEND view has only the bars.
             let cx = x + w / 2.0;
-            painter.hline(
-                p.pos(x + 2.0, 0.0).x..=p.pos(x + w - 2.0, 0.0).x,
-                p.pos(0.0, 82.0).y,
-                Stroke::new(0.5 * s, LCD_INK),
-            );
-            painter.rect_filled(
-                p.rect(cx + pad.pan as f32 / 50.0 * (w / 2.0 - 2.0) - 1.0, 79.5, 2.0, 5.0),
-                0.0,
-                LCD_INK,
-            );
+            if !self.mixer_fx {
+                painter.hline(
+                    p.pos(x + 2.0, 0.0).x..=p.pos(x + w - 2.0, 0.0).x,
+                    p.pos(0.0, 82.0).y,
+                    Stroke::new(0.5 * s, LCD_INK),
+                );
+                painter.rect_filled(
+                    p.rect(cx + pad.pan as f32 / 50.0 * (w / 2.0 - 2.0) - 1.0, 79.5, 2.0, 5.0),
+                    0.0,
+                    LCD_INK,
+                );
+            }
             let bar = p.rect(x + 4.0, 87.0, w - 8.0, 32.0);
             painter.rect_stroke(bar, 0.0, Stroke::new(0.7 * s, LCD_INK), StrokeKind::Inside);
-            let h = 32.0 * pad.level as f32 / 100.0;
+            let value = if self.mixer_fx { pad.fx_send } else { pad.level };
+            let h = 32.0 * value as f32 / 100.0;
             painter.rect_filled(p.rect(x + 4.0, 87.0 + 32.0 - h, w - 8.0, h), 0.0, LCD_INK);
             let label = p.rect(x + 1.0, 121.0, w - 2.0, 8.0);
             if selected {

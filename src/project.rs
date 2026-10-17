@@ -33,6 +33,8 @@ struct ProjectFile {
     /// The program each DRUM bus plays.
     #[serde(default)]
     drums: [usize; DRUMS],
+    #[serde(default)]
+    fx: crate::fx::FxSettings,
     /// Only sequences that differ from the default.
     sequences: Vec<SeqFile>,
     #[serde(default)]
@@ -96,6 +98,8 @@ struct PadFile {
     velo: Velo,
     #[serde(default)]
     fenv: FilterEnv,
+    #[serde(default)]
+    fx_send: u32,
 }
 
 fn default_switch() -> [u8; 2] {
@@ -174,6 +178,7 @@ fn describe(s: &Shared) -> ProjectFile {
         pads: Vec::new(),
         programs,
         drums: s.drums,
+        fx: s.fx,
         sequences,
         song: SongFile { steps: s.song.steps.iter().map(|&(q, r)| [q as u32, r]).collect(), looping: s.song.looping },
         setup: SetupFile {
@@ -276,6 +281,7 @@ fn pad_file(pad: usize, p: &Pad, sound: Option<SoundFile>) -> PadFile {
         switch: p.switch,
         velo: p.velo,
         fenv: p.fenv,
+        fx_send: p.fx_send,
     }
 }
 
@@ -392,6 +398,7 @@ fn load_pads(list: Vec<PadFile>, root: &Path, rate: u32, version: u32) -> Result
                 decay: p.fenv.decay.min(100),
                 amount: p.fenv.amount.min(100),
             },
+            fx_send: p.fx_send.min(100),
         };
     }
 
@@ -487,6 +494,14 @@ impl Loaded {
         s.seqs = seqs;
         s.song = song;
         s.master = file.master.clamp(0.0, 1.0);
+        s.fx = crate::fx::FxSettings {
+            reverb: file.fx.reverb.min(100),
+            size: file.fx.size.min(100),
+            damp: file.fx.damp.min(100),
+            delay: file.fx.delay.min(100),
+            time: file.fx.time.min(crate::fx::DELAY_TIMES.len() - 1),
+            feedback: file.fx.feedback.min(95),
+        };
         s.t.timing = file.timing.min(TIMING.len() - 1);
         s.t.swing = file.swing.clamp(50, 75);
         s.t.count_in = file.count_in;

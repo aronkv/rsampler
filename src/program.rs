@@ -183,6 +183,8 @@ pub struct Pad {
     pub switch: [u8; 2],
     pub velo: Velo,
     pub fenv: FilterEnv,
+    /// How much goes to the effects, 0..=100.
+    pub fx_send: u32,
 }
 
 impl Default for Pad {
@@ -205,6 +207,7 @@ impl Default for Pad {
             switch: [64, 100],
             velo: Velo::default(),
             fenv: FilterEnv::default(),
+            fx_send: 0,
         }
     }
 }
@@ -248,6 +251,7 @@ impl Pad {
             switch: self.switch,
             velo: self.velo,
             fenv: self.fenv,
+            fx_send: self.fx_send,
         };
         if let Some((param, v)) = var {
             let scaled = v.min(127) as u32 * 100 / 127;

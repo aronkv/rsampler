@@ -53,7 +53,7 @@ installing.
 ## Usage
 
 [Pads](#pads) · [NOTE VARIATION](#note-variation) · [Recording](#recording-a-sequence) ·
-[EDIT](#edit-copying-bars-and-notes) · [MISC](#misc-punch-transpose-and-a-second-sequence) · [SONG](#song) · [STEP EDIT](#step-edit) · [PROGRAM](#program-how-each-pad-plays) · [MIXER](#mixer) ·
+[EDIT](#edit-copying-bars-and-notes) · [MISC](#misc-punch-transpose-and-a-second-sequence) · [SONG](#song) · [STEP EDIT](#step-edit) · [PROGRAM](#program-how-each-pad-plays) · [MIXER](#mixer-and-effects) ·
 [TRIM](#trim-loop-and-zone-editing-a-sound) · [Loading samples](#loading-samples) · [SAMPLE](#sample-recording-from-the-input) ·
 [Projects](#saving-and-loading-projects) · [MIDI](#midi) · [Shortcuts](#keyboard-shortcuts)
 
@@ -267,11 +267,26 @@ Below it is the FILTER ENVELOPE: on each hit the filter opens by `Amount` over `
 closes back to `Filter` over `Decay` (each 0–100, up to five seconds), the classic sweep of a
 filtered bass or a "wah" on a drum. It needs `Filter` below 100. **PROGRAM** (F1) goes back.
 
-### MIXER
+### MIXER and effects
 
 The blue **8 / MIXER** key shows the 16 pads of the current bank as level faders with pan markers.
 **←** / **→** choose the pad, **↑** selects `Level` and **↓** selects `Pan`, and the DATA wheel sets
 the value. **RESET** (F6) returns the pad to full level, centre.
+
+**FX SEND** (F2) shows how much of each pad goes to the effects instead (0–100; **STEREO**, F1, goes
+back), and **FX** (F5) opens the effects themselves, standing in for the MPC2000XL's optional
+effects board:
+
+| Field      | What it does                                                          |
+| ---------- | --------------------------------------------------------------------- |
+| Reverb `Level`, `Size`, `Damp` | How loud the reverb is, how long it rings, how dark it gets |
+| Delay `Level` | How loud the echoes are                                            |
+| `Time`     | Echo spacing in note lengths at the sequence tempo: 1/4, 1/8D, 1/4T, 1/8, 1/16D, 1/8T, 1/16 |
+| `Feedback` | How many echoes follow, up to 95                                      |
+
+Both effects work on everything sent to them, so a snare with FX SEND 40 gets room while the kick
+stays dry. The settings are saved with the project, the WAV export includes the effects and their
+tails, and the FX send of an MPC `.PGM` carries over.
 
 ### TRIM, LOOP and ZONE: editing a sound
 
@@ -450,7 +465,6 @@ shows the version and the output sample rate.
 ### Not there yet
 
 - Windows-specific testing
-- Effects
 
 ## Reference
 

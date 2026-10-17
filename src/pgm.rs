@@ -34,6 +34,8 @@ pub struct NoteParams {
     pub switch: [u8; 2],
     pub velo: Velo,
     pub fenv: FilterEnv,
+    /// The mixer's FX send, when its FX path is on.
+    pub fx_send: u32,
 }
 
 pub struct Pgm {
@@ -122,6 +124,7 @@ fn pads<'a>(
                     decay: q[17].min(100) as u32,
                     amount: q[18].min(100) as u32,
                 },
+                fx_send: if m[0] == 0 { 0 } else { m[5].min(100) as u32 },
             };
             Some((n, params))
         })
@@ -251,6 +254,7 @@ pub fn load(path: &Path, rate: u32) -> Result<Loaded, String> {
                     switch: q.switch,
                     velo: q.velo,
                     fenv: q.fenv,
+                    fx_send: q.fx_send,
                 });
             }
             let mut note_pads = [None; 64];
@@ -336,6 +340,7 @@ mod tests {
                 switch: [44, 0],
                 velo: Velo { level: 70, attack: 10, start: 20, filter: 30 },
                 fenv: FilterEnv { attack: 5, decay: 50, amount: 40 },
+                fx_send: 0,
             }
         );
         assert_eq!(pgm.pads[1].as_ref().unwrap().1.sound.as_deref(), Some("KICK"));

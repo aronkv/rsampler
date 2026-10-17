@@ -176,6 +176,7 @@ pub struct Shared {
     pub preview: Option<Sound>,
     /// The MIDI out port chosen in SETUP, saved with the project; the UI opens it.
     pub out_port: String,
+    pub fx: crate::fx::FxSettings,
 }
 
 impl Shared {
@@ -221,6 +222,7 @@ impl Shared {
             key_velocity: 101,
             preview: None,
             out_port: crate::midi::OUT_OFF.to_owned(),
+            fx: crate::fx::FxSettings::default(),
         }
     }
 
@@ -243,6 +245,14 @@ impl Shared {
     pub fn pads_mut(&mut self) -> &mut [Pad] {
         let p = self.program();
         &mut self.programs[p].pads
+    }
+
+    /// The tempo playing: the sequence's, or the external clock's when synced.
+    pub fn tempo(&self) -> f32 {
+        match (self.t.sync, self.t.ext.tempo()) {
+            (true, Some(ext)) => ext,
+            _ => self.seq().tempo,
+        }
     }
 
     pub fn seq(&self) -> &Sequence {
@@ -524,10 +534,7 @@ impl Shared {
             self.t.next_tick += 1;
         }
         let rate = self.rate as f64;
-        let tempo = match (self.t.sync, self.t.ext.tempo()) {
-            (true, Some(ext)) => ext,
-            _ => self.seq().tempo,
-        };
+        let tempo = self.tempo();
         self.t.tick += tempo as f64 * crate::seq::PPQ as f64 / 60.0 / rate;
         if self.t.sync {
             // Never run more than one pulse ahead of the clock; the next pulse lets it go on.
@@ -738,7 +745,7 @@ impl Engine {
                 }
                 for frame in out.chunks_mut(channels) {
                     s.advance(&mut voices);
-                    let [l, r] = voices.render();
+                    let [l, r] = voices.render(&s.fx, s.tempo());
                     let (l, r) = (soft_clip(l * s.master), soft_clip(r * s.master));
                     for (i, x) in frame.iter_mut().enumerate() {
                         *x = if i % 2 == 0 { l } else { r };
@@ -807,6 +814,8 @@ struct Voice {
     loop_to: Option<f64>,
     rate: f64,
     gain: [f32; 2],
+    /// Share of the output that goes to the effects.
+    send: f32,
     age: u32,
     attack: u32,
     /// START mode: decay time constant in frames after the attack.
@@ -916,6 +925,7 @@ pub struct Voices {
     voices: Vec<Voice>,
     rate: u32,
     clicks: [Frames; 2],
+    fx: crate::fx::Fx,
 }
 
 impl Voices {
@@ -930,7 +940,12 @@ impl Voices {
                 })
                 .collect()
         };
-        Self { voices: Vec::with_capacity(MAX_VOICES + 8), rate, clicks: [click(1000.0), click(1600.0)] }
+        Self {
+            voices: Vec::with_capacity(MAX_VOICES + 8),
+            rate,
+            clicks: [click(1000.0), click(1600.0)],
+            fx: crate::fx::Fx::new(rate),
+        }
     }
 
     fn cut(&mut self, key: u16) {
@@ -991,6 +1006,7 @@ impl Voices {
             loop_to: None,
             rate: 1.0,
             gain: [1.0, 1.0],
+            send: 0.0,
             age: 0,
             attack: 0,
             decay_tau: None,
@@ -1003,15 +1019,22 @@ impl Voices {
         });
     }
 
-    fn render(&mut self) -> [f32; 2] {
-        let mut mix = [0.0; 2];
+    /// One frame of output: the voices, plus the effects on what they send.
+    fn render(&mut self, fx: &crate::fx::FxSettings, tempo: f32) -> [f32; 2] {
+        let (mut mix, mut send) = ([0.0; 2], [0.0; 2]);
         for v in &mut self.voices {
             let [l, r] = v.next();
-            mix[0] += l;
-            mix[1] += r;
+            (mix[0], mix[1]) = (mix[0] + l, mix[1] + r);
+            (send[0], send[1]) = (send[0] + l * v.send, send[1] + r * v.send);
         }
         self.voices.retain(|v| !v.done());
-        mix
+        let [l, r] = self.fx.process(send, fx, tempo);
+        [mix[0] + l, mix[1] + r]
+    }
+
+    /// Nothing sounding any more, effect tails included.
+    fn quiet(&self) -> bool {
+        self.voices.is_empty() && self.fx.level < 1e-4
     }
 }
 
@@ -1057,6 +1080,7 @@ fn voice(p: &Pad, sound: &Sound, key: u16, velocity: u8, rate: u32) -> Voice {
         loop_to,
         rate: 2f64.powf(p.tune as f64 / 120.0),
         gain: [angle.cos() * level, angle.sin() * level],
+        send: p.fx_send as f32 / 100.0,
         age: 0,
         attack: (secs(p.attack, 1.0) + secs(soft_attack, 1.0)) as u32,
         decay_tau,
@@ -1072,7 +1096,7 @@ fn voice(p: &Pad, sound: &Sound, key: u16, velocity: u8, rate: u32) -> Voice {
 /// A copy of what [`render`] needs, taken quickly so the audio lock is not held while rendering.
 pub fn bounce(live: &Shared, song: bool) -> Shared {
     let mut s = Shared::new(live.rate);
-    (s.programs, s.drums) = (live.programs.clone(), live.drums);
+    (s.programs, s.drums, s.fx) = (live.programs.clone(), live.drums, live.fx);
     s.seqs = live.seqs.clone();
     s.master = live.master;
     (s.t.seq, s.t.solo, s.t.second) = (live.t.seq, live.t.solo, live.t.second);
@@ -1095,7 +1119,7 @@ pub fn render(mut s: Shared) -> Vec<[f32; 2]> {
     let mut out = Vec::new();
     let mix = |s: &mut Shared, v: &mut Voices, out: &mut Vec<[f32; 2]>| {
         s.advance(v);
-        let [l, r] = v.render();
+        let [l, r] = v.render(&s.fx, s.tempo());
         out.push([soft_clip(l * s.master), soft_clip(r * s.master)]);
     };
     // ponytail: renders everything into memory; an hour at 48 kHz is about 1.4 GB, so it stops
@@ -1109,7 +1133,7 @@ pub fn render(mut s: Shared) -> Vec<[f32; 2]> {
         v.release(key);
     }
     for _ in 0..rate as usize * 10 {
-        if v.voices.is_empty() {
+        if v.quiet() {
             break;
         }
         mix(&mut s, &mut v, &mut out);
@@ -1222,7 +1246,7 @@ mod tests {
         }
         for _ in 0..frames {
             s.advance(v);
-            let [l, r] = v.render();
+            let [l, r] = v.render(&s.fx, 120.0);
             peak = peak.max(l.abs()).max(r.abs());
         }
         peak
@@ -1589,7 +1613,7 @@ mod tests {
             for hit in std::mem::take(&mut s.hits) {
                 s.handle_hit(hit, v);
             }
-            let sum: f32 = (0..frames).map(|_| v.render()[0].powi(2)).sum();
+            let sum: f32 = (0..frames).map(|_| v.render(&s.fx, 120.0)[0].powi(2)).sum();
             (sum / frames as f32).sqrt()
         };
         rms(&mut s, &mut v, 2_000);
