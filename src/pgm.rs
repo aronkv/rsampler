@@ -86,9 +86,17 @@ pub fn parse(b: &[u8]) -> Result<Pgm, String> {
     Ok(Pgm { name: text(&b[name_at..name_at + 17]), pads })
 }
 
-/// Loads a program and its sounds as the 64 pads. Returns the pads and the names of sounds that
-/// were not found next to the program.
-pub fn load(path: &Path, rate: u32) -> Result<(String, Vec<Pad>, Vec<String>), String> {
+pub struct Loaded {
+    pub name: String,
+    pub pads: Vec<Pad>,
+    /// Sounds that were not found next to the program.
+    pub missing: Vec<String>,
+    /// Which pad plays each MPC drum note (35–98), for importing the MPC's sequences.
+    pub note_pads: [Option<u8>; 64],
+}
+
+/// Loads a program and its sounds as the 64 pads.
+pub fn load(path: &Path, rate: u32) -> Result<Loaded, String> {
     let pgm = parse(&std::fs::read(path).map_err(|e| e.to_string())?)?;
     let dir = path.parent().unwrap_or(Path::new("."));
     let files: Vec<_> = std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).collect();
@@ -136,7 +144,15 @@ pub fn load(path: &Path, rate: u32) -> Result<(String, Vec<Pad>, Vec<String>), S
             pan: q.pan,
         });
     }
-    Ok((pgm.name, pads, missing))
+    let mut note_pads = [None; 64];
+    for (pad, entry) in pgm.pads.iter().enumerate() {
+        if let Some((note, _)) = entry
+            && note_pads[*note].is_none()
+        {
+            note_pads[*note] = Some(pad as u8);
+        }
+    }
+    Ok(Loaded { name: pgm.name, pads, missing, note_pads })
 }
 
 #[cfg(test)]
@@ -223,7 +239,9 @@ mod tests {
         snd.extend(44_100u16.to_le_bytes());
         snd.extend([0, 1, 0, 2]);
         std::fs::write(dir.join("snare.snd"), snd).unwrap();
-        let (name, pads, missing) = load(&dir.join("TEST.PGM"), 44_100).unwrap();
+        let Loaded { name, pads, missing, note_pads } = load(&dir.join("TEST.PGM"), 44_100).unwrap();
+        // Note 37 is on pad 1, note 36 on pad 2.
+        assert_eq!((note_pads[2], note_pads[1], note_pads[0]), (Some(0), Some(1), None));
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(name, "MyPgm");
         assert_eq!(missing, ["KICK"]);

@@ -229,6 +229,15 @@ from −60 to 0 dBFS with the threshold marked. **REC** (F6) waits for the thres
 **STOP** ends the take early, then **KEEP** (F6) puts it on the pad as `SAMPLExx` and plays it, or
 **RETRY** (F5) records again. Use TRIM afterwards to cut off silence.
 
+### MIDI files
+
+A MIDI file (`.mid`) chosen on the LOAD screen replaces the current sequence (press `Enter` twice;
+**UNDO SEQ** brings the old one back), with its tempo, time signature and length, one track per
+MIDI track. Notes 36–99 play pads A01–D16. Sequences saved by an MPC2000XL use its own drum note
+numbers, so load the matching `.PGM` first: its pad assignments are then used for the notes.
+
+**MIDI** (F4) on the SAVE screen writes the current sequence as `<name>.mid`, to open in a DAW.
+
 ### Saving and loading projects
 
 A project is a folder holding `rsampler.json` (sequences, pad settings, mixer) and the pad sounds as
@@ -299,8 +308,8 @@ shows the version and the output sample rate.
 - MIDI output on Windows
 - Windows-specific testing
 - The MISC mode
-- Loading the MPC's sequence and ALL files (`.SEQ`, `.APS`, `.ALL`); `.SND` sounds and `.PGM`
-  programs already load
+- Loading the MPC's `.SEQ`, `.APS` and `.ALL` files; its `.SND` sounds, `.PGM` programs and
+  `.MID` sequences already load
 - Windows builds
 
 ## Reference

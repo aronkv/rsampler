@@ -4,6 +4,7 @@
 mod audio;
 mod lcd;
 mod midi;
+mod midifile;
 mod panel;
 mod pgm;
 mod program;
@@ -81,6 +82,8 @@ struct App {
     step: usize,
     /// Selected step on the SONG screen.
     song_step: usize,
+    /// Pads of the MPC drum notes 35–98, from the last loaded MPC program.
+    mpc_notes: Option<[Option<u8>; 64]>,
     /// NOTE VARIATION: the pad the slider affects, what it changes, and the slider (0..=127).
     var_pad: usize,
     var_param: program::VarParam,
@@ -171,6 +174,7 @@ impl App {
             pad: 0,
             step: 0,
             song_step: 0,
+            mpc_notes: None,
             var_pad: 0,
             var_param: program::VarParam::Tune,
             var_value: 64,
@@ -590,6 +594,9 @@ impl App {
         if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pgm")) {
             return self.load_program(path);
         }
+        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("mid")) {
+            return self.import_midi(path);
+        }
         let pad = self.pad;
         let rate = self.with(|s| s.rate);
         let is_snd = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("snd"));
@@ -618,6 +625,64 @@ impl App {
         }
     }
 
+    /// A MIDI file replaces the current sequence (UNDO SEQ brings it back), after a second ENTER.
+    fn import_midi(&mut self, path: PathBuf) {
+        if self.confirm.as_ref() != Some(&path) {
+            self.say("Replaces this sequence. ENTER again to load");
+            self.confirm = Some(path);
+            return;
+        }
+        self.confirm = None;
+        let smf = match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| midifile::parse(&b)) {
+            Ok(smf) => smf,
+            Err(e) => return self.say(e),
+        };
+        // Files saved by an MPC use its drum notes; with an MPC program loaded, they go to the
+        // program's pads. Otherwise notes 36–99 are pads A01–D16, as for MIDI input.
+        let mpc = self.mpc_notes;
+        let pad_of = move |note: u8| match mpc {
+            Some(map) => (note as usize).checked_sub(35).and_then(|n| map.get(n).copied().flatten()),
+            None => note.checked_sub(midi::FIRST_NOTE).filter(|p| (*p as usize) < PADS),
+        };
+        let (seq, dropped) = midifile::to_sequence(&smf, pad_of);
+        let n = self.with(|s| {
+            s.stop();
+            s.checkpoint();
+            *s.seq_mut() = seq;
+            s.locate(0);
+            s.t.seq + 1
+        });
+        let skipped = if dropped > 0 { format!(", {dropped} notes skipped") } else { String::new() };
+        self.say(format!("Sequence {n:02} loaded{skipped}"));
+    }
+
+    /// MIDI (F4) on the SAVE screen: writes the current sequence as `<name>.mid` for a DAW.
+    fn export_midi(&mut self) {
+        let Screen::Save(b) = &self.screen else { return };
+        let name = self.save_name.trim();
+        if name.is_empty() {
+            return self.say("Type a name first (NAME)");
+        }
+        let path = b.dir.join(format!("{name}.mid"));
+        if path.exists() && self.confirm.as_ref() != Some(&path) {
+            self.say("Exists. MIDI again to replace");
+            self.confirm = Some(path);
+            return;
+        }
+        self.confirm = None;
+        let bytes = self.with(|s| midifile::from_sequence(s.seq()));
+        match std::fs::write(&path, bytes) {
+            Ok(()) => {
+                let dir = b.dir.clone();
+                if let Screen::Save(b) = &mut self.screen {
+                    *b = Browser::open(dir, false);
+                }
+                self.say(format!("Wrote {name}.mid"));
+            }
+            Err(e) => self.say(e.to_string()),
+        }
+    }
+
     /// An MPC program replaces all 64 pads, so it takes a second ENTER to confirm.
     fn load_program(&mut self, path: PathBuf) {
         if self.confirm.as_ref() != Some(&path) {
@@ -628,8 +693,9 @@ impl App {
         self.confirm = None;
         let rate = self.with(|s| s.rate);
         match pgm::load(&path, rate) {
-            Ok((name, pads, missing)) => {
+            Ok(pgm::Loaded { name, pads, missing, note_pads }) => {
                 self.with(|s| s.pads = pads);
+                self.mpc_notes = Some(note_pads);
                 if missing.is_empty() {
                     self.say(format!("Loaded program {name}"));
                 } else {
@@ -685,9 +751,17 @@ impl App {
         }
     }
 
+    /// Opens SAVE in the folder being browsed, else the open project's folder, else the last one.
     fn open_save(&mut self) {
-        let dir =
-            self.project.as_ref().and_then(|p| p.parent()).map(PathBuf::from).unwrap_or_else(|| self.load_dir.clone());
+        let dir = match &self.screen {
+            Screen::Load(b) => b.dir.clone(),
+            _ => self
+                .project
+                .as_ref()
+                .and_then(|p| p.parent())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| self.load_dir.clone()),
+        };
         self.set_screen(Screen::Save(Browser::open(dir, false)));
     }
 
@@ -790,6 +864,7 @@ impl App {
             (Screen::Load(_) | Screen::Save(_), 0) => self.parent_dir(),
             (Screen::Load(_), 1) => self.open_save(),
             (Screen::Load(_), 5) => self.enter(),
+            (Screen::Save(_), 3) => self.export_midi(),
             (Screen::Save(_), 4) => (self.editing_name, self.replace_name) = (true, true),
             (Screen::Save(_), 5) => self.save_here(),
             (Screen::Program, 0) => self.mode("LOAD"),

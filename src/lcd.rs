@@ -29,9 +29,9 @@ impl Browser {
     }
 }
 
-/// WAV files, and the MPC2000XL's own .SND sounds and .PGM programs.
+/// WAV files, the MPC2000XL's own .SND sounds and .PGM programs, and MIDI files.
 fn is_sound(path: &Path) -> bool {
-    path.extension().is_some_and(|e| ["wav", "snd", "pgm"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+    path.extension().is_some_and(|e| ["wav", "snd", "pgm", "mid"].iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
 
 pub enum Screen {
@@ -56,7 +56,7 @@ impl Screen {
             Screen::Main => ["STEP", "UNDO", "TR.ON", "SOLO", "TR -", "TR +"],
             Screen::Step => ["DELETE", "", "", "", "TR -", "TR +"],
             Screen::Load(_) => ["UP DIR", "SAVE", "", "", "", "DO IT"],
-            Screen::Save(_) => ["UP DIR", "", "", "", "NAME", "DO IT"],
+            Screen::Save(_) => ["UP DIR", "", "", "MIDI", "NAME", "DO IT"],
             Screen::Program => ["LOAD", "TRIM", "MIXER", "", "", "CLEAR"],
             Screen::Mixer => ["", "", "", "", "", "RESET"],
             Screen::Trim => ["PLAY", "", "", "", "", "RESET"],
