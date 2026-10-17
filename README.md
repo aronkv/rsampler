@@ -175,8 +175,8 @@ Open it with the blue **6 / PROGRAM** key. Hit a pad (or change `Pad`) to choose
 | --------- | -------------------------------------------------------------------------- |
 | `Tune`    | ±12 semitones, in 0.1 steps                                                 |
 | `Attack`  | Fade-in time, 0 = instant                                                  |
-| `Decay`   | 100 lets the sound play out; lower values shorten it                        |
-| `Dcy md`  | END fades out towards the end of the sound, START decays right after the attack |
+| `Decay`   | Fade time, up to two seconds (default 5, a short fade)                     |
+| `Dcy md`  | END fades out over the decay time before the sound ends; START dies away from the end of the attack, slower for larger values |
 | `Filter`  | Low-pass cutoff, 100 = open                                                |
 | `Reso`    | Filter resonance                                                           |
 | `Overlap` | POLY layers repeated hits, MONO cuts the previous hit, NOTE OFF stops when the pad is released |

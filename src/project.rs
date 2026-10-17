@@ -11,7 +11,9 @@ use crate::program::{Frames, Overlap, PADS, Pad, Sound, VarParam, pad_name};
 use crate::seq::{Note, SEQUENCES, Sequence, TIMING, TRACKS};
 
 pub const FILE: &str = "rsampler.json";
-const VERSION: u32 = 1;
+/// 2: `decay` became a time, as on the MPC; version 1 stored where the END fade began, in percent
+/// of the sound.
+const VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct ProjectFile {
@@ -308,11 +310,19 @@ pub fn load(root: &Path, rate: u32) -> Result<Loaded, String> {
             }
             None => None,
         };
+        let mut decay = p.decay.min(100);
+        if file.version < 2 && !p.decay_from_start {
+            // Version 1 faded from `decay` percent of the sound to its end; turn that into the
+            // same fade length.
+            let secs = sound.as_ref().map_or(0.0, |s| (s.end - s.start) as f32 / rate as f32);
+            let fade = secs * (100 - decay) as f32 / 100.0;
+            decay = ((fade / 2.0).sqrt() * 100.0).round().min(100.0) as u32;
+        }
         *slot = Pad {
             sound,
             tune: p.tune.clamp(-120, 120),
             attack: p.attack.min(100),
-            decay: p.decay.min(100),
+            decay,
             decay_from_start: p.decay_from_start,
             cutoff: p.cutoff.min(100),
             resonance: p.resonance.min(100),
@@ -473,6 +483,27 @@ mod tests {
         assert_eq!(before, fingerprint(&s));
         s.seqs[0].tracks[0].insert(Note { tick: 0, pad: 0, velocity: 1, duration: 1, var: None });
         assert_ne!(before, fingerprint(&s));
+    }
+
+    #[test]
+    fn version_1_decay_becomes_a_fade_time() {
+        let rate = 48_000;
+        let mut s = audio::offline_shared(rate);
+        // Two seconds of sound; version 1 started the fade halfway through.
+        s.pads[0].sound = Some(Sound::new("TONE", vec![[0.1f32; 2]; 2 * rate as usize].into()));
+        s.pads[0].decay = 50;
+        s.pads[1].decay = 30;
+        s.pads[1].decay_from_start = true;
+        let dir = std::env::temp_dir().join(format!("rsampler-v1-{}", std::process::id()));
+        let root = save(&snapshot(&s), &dir, "Old").unwrap();
+        let json = fs::read_to_string(root.join(FILE)).unwrap().replace("\"version\": 2", "\"version\": 1");
+        fs::write(root.join(FILE), json).unwrap();
+        let mut t = audio::offline_shared(rate);
+        load(&root, rate).unwrap().apply(&mut t);
+        fs::remove_dir_all(&dir).unwrap();
+        // A one-second fade is decay 71 (0.71² × 2 s); START mode keeps its value.
+        assert_eq!(t.pads[0].decay, 71);
+        assert_eq!(t.pads[1].decay, 30);
     }
 
     #[test]

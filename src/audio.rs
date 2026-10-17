@@ -664,7 +664,7 @@ struct Voice {
     attack: u32,
     /// START mode: decay time constant in frames after the attack.
     decay_tau: Option<f32>,
-    /// END mode: source position where the fade towards the end begins.
+    /// END mode: source position where the fade-out before the end begins.
     fade_from: Option<f64>,
     release: Option<(f32, u32, u32)>,
     release_len: u32,
@@ -814,8 +814,11 @@ fn voice(p: &Pad, sound: &Sound, pad: u8, velocity: u8, rate: u32) -> Voice {
     let r = rate as f32;
     let (start, end) = (sound.start as f64, sound.end.min(sound.frames.len()) as f64);
     let secs = |v: u32, max: f32| (v as f32 / 100.0).powi(2) * max * r;
-    let decay_tau = (p.decay_from_start && p.decay < 100).then(|| secs(p.decay, 2.0).max(r * 0.005));
-    let fade_from = (!p.decay_from_start && p.decay < 100).then(|| start + (end - start) * p.decay as f64 / 100.0);
+    // Decay is a time, as on the MPC: START decays from the end of the attack, END fades out over
+    // that long before the end of the sound (0 stops it abruptly).
+    let decay = secs(p.decay, 2.0);
+    let decay_tau = p.decay_from_start.then(|| decay.max(r * 0.005));
+    let fade_from = (!p.decay_from_start && decay >= 1.0).then(|| (end - decay as f64).max(start));
     // Equal-power pan, normalised so the centre stays at full level.
     let angle = (p.pan + 50) as f32 / 100.0 * PI / 2.0;
     let level = p.level as f32 / 100.0 * velocity as f32 / 127.0 * std::f32::consts::SQRT_2;

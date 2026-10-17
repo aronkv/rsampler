@@ -78,9 +78,10 @@ pub struct Pad {
     pub tune: i32,
     /// 0..=100; 0 starts instantly.
     pub attack: u32,
-    /// 0..=100; 100 lets the sound play out.
+    /// Decay time 0..=100 (up to two seconds): how long the fade-out before the end of the sound
+    /// lasts (END), or how slowly it dies away after the attack (START).
     pub decay: u32,
-    /// Decay measured from the attack (START) instead of towards the sound's end (END).
+    /// Decay right after the attack (START) instead of before the sound's end (END).
     pub decay_from_start: bool,
     /// Low-pass cutoff 0..=100; 100 is fully open.
     pub cutoff: u32,
@@ -101,7 +102,8 @@ impl Default for Pad {
             sound: None,
             tune: 0,
             attack: 0,
-            decay: 100,
+            // The MPC's default: a short fade at the very end.
+            decay: 5,
             decay_from_start: false,
             cutoff: 100,
             resonance: 0,
