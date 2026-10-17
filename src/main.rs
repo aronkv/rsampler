@@ -147,6 +147,8 @@ struct App {
     edit_to: usize,
     /// TIME STRETCH: new length in tenths of a percent of the old.
     edit_ratio: u32,
+    /// RESAMPLE: the new sample rate and bit depth.
+    edit_resample: (u32, u32),
     seq_edit: lcd::SeqEdit,
     /// The pads as they were before the last sound edit, for UNDO SEQ on the TRIM screens.
     /// Keyed by program and pad.
@@ -264,6 +266,7 @@ impl App {
             edit_op: edit::Op::Discard,
             edit_to: 16,
             edit_ratio: 1000,
+            edit_resample: (22_050, 12),
             sound_undo: None,
             name_buf: String::new(),
             copy_to: 1,
@@ -430,7 +433,7 @@ impl App {
             song_step: self.song_step,
             var: (self.var_pad, self.var_param, self.var_value),
             zone: (self.zone, &self.zones),
-            edit: (self.edit_op, self.edit_to, self.edit_ratio),
+            edit: (self.edit_op, self.edit_to, self.edit_ratio, self.edit_resample),
             seq_edit: &self.seq_edit,
             levels: (self.levels_pad, self.levels_var, self.levels_key),
             bank: self.bank,
@@ -557,6 +560,16 @@ impl App {
                     .collect();
                 let i = ops.iter().position(|o| *o == self.edit_op).unwrap_or(0) as i32;
                 return self.edit_op = ops[(i + d).clamp(0, ops.len() as i32 - 1) as usize];
+            }
+            // 1000 Hz a step, 50 Hz with Shift, as low as the MPC's 4000 Hz.
+            Field::EditRate => {
+                let by = if fine { 50 } else { 1000 };
+                return self.edit_resample.0 = (self.edit_resample.0 as i32 + d * by).clamp(4_000, 48_000) as u32;
+            }
+            Field::EditBits => {
+                const BITS: [u32; 3] = [8, 12, 16];
+                let i = BITS.iter().position(|b| *b == self.edit_resample.1).unwrap_or(1) as i32;
+                return self.edit_resample.1 = BITS[(i + d).clamp(0, 2) as usize];
             }
             // 1 % a step, 0.1 % with Shift.
             Field::EditRatio => {
@@ -835,6 +848,8 @@ impl App {
                 | Field::LevelsKey
                 | Field::OutPort
                 | Field::EditRatio
+                | Field::EditRate
+                | Field::EditBits
                 | Field::CopyTo
                 | Field::Bus
                 | Field::Pgm => {}
@@ -973,20 +988,30 @@ impl App {
         self.say("Sound edit undone (UNDO SEQ again redoes it)");
     }
 
-    /// TIME STRETCH: the section as a new sound on `To pad`. The stretching runs without the
-    /// audio lock, so playback carries on meanwhile.
-    fn time_stretch(&mut self, range: std::ops::Range<usize>, ratio: u32, from: Section) {
-        let (pad, to) = (self.pad, self.edit_to);
+    /// TIME STRETCH and RESAMPLE: the section as a new sound on `To pad`. The processing runs
+    /// without the audio lock, so playback carries on meanwhile.
+    fn process_to_pad(&mut self, range: std::ops::Range<usize>, ratio: u32, from: Section) {
+        let (pad, to, op, (fs, bits)) = (self.pad, self.edit_to, self.edit_op, self.edit_resample);
         let Some((snd, rate)) = self.with(|s| s.pads_mut()[pad].sound.clone().map(|snd| (snd, s.rate))) else {
             return self.say("No sound on this pad");
         };
-        let name = format!("{}-T", snd.name.chars().take(13).collect::<String>());
+        let resample = op == edit::Op::Resample;
+        let suffix = if resample { "R" } else { "T" };
+        let name = format!("{}-{suffix}", snd.name.chars().take(13).collect::<String>());
         let part = edit::section(&snd, range, name);
-        let frames = edit::stretch(&part.frames, ratio as f64 / 1000.0, rate);
+        let frames = if resample {
+            edit::crush(&part.frames, rate, fs, bits)
+        } else {
+            edit::stretch(&part.frames, ratio as f64 / 1000.0, rate)
+        };
         let sound = Sound::new(part.name, frames.into());
         self.with(|s| s.pads_mut()[to] = program::Pad { sound: Some(sound), ..program::Pad::default() });
         self.set_screen(from.screen());
-        self.say(format!("Stretched to {:.1}% on {}", ratio as f32 / 10.0, program::pad_name(to)));
+        self.say(if resample {
+            format!("Resampled to {fs} Hz {bits} bit on {}", program::pad_name(to))
+        } else {
+            format!("Stretched to {:.1}% on {}", ratio as f32 / 10.0, program::pad_name(to))
+        });
     }
 
     /// The part of the selected pad's sound EDIT works on.
@@ -1007,7 +1032,7 @@ impl App {
         // Keeps the pads the edit can change, for UNDO SEQ.
         let changes = match op {
             edit::Op::Slice => to..(to + self.zones.len() - 1).min(PADS),
-            edit::Op::NewSound | edit::Op::TimeStretch => to..to + 1,
+            edit::Op::NewSound | edit::Op::TimeStretch | edit::Op::Resample => to..to + 1,
             _ => pad..pad + 1,
         };
         self.sound_undo = Some(self.with(|s| {
@@ -1020,8 +1045,8 @@ impl App {
         } else {
             vec![range.clone()]
         };
-        if op == edit::Op::TimeStretch {
-            return self.time_stretch(range, ratio, from);
+        if matches!(op, edit::Op::TimeStretch | edit::Op::Resample) {
+            return self.process_to_pad(range, ratio, from);
         }
         if op == edit::Op::Insert {
             let msg = self.with(|s| {

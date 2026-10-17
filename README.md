@@ -320,6 +320,7 @@ Every point moves by 1/500 of the sound per DATA wheel step, or by single frames
 | SILENCE SECTION       | Makes the section silent                                       |
 | REVERSE SECTION       | Plays the section backwards                                    |
 | TIME STRETCH          | Puts the section on `To pad` made longer or shorter at the same pitch: `Ratio` is the new length, 50–200 % (1 % a step, 0.1 % with Shift) |
+| RESAMPLE              | Puts the section on `To pad` as if sampled again at `New fs` (4000–48000 Hz) and 8, 12 or 16 `Bits`, without smoothing: the gritty sound of old samplers |
 | NORMALIZE SECTION     | Raises the section until its loudest point is at full level    |
 | SLICE SOUND (ZONE)    | Puts every zone on its own pad, from `To pad` on               |
 

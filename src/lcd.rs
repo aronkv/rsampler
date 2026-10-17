@@ -247,6 +247,8 @@ pub enum Field {
     FxDelay,
     FxTime,
     FxFeedback,
+    EditRate,
+    EditBits,
 }
 
 /// The settings of the sequence EDIT screens, kept between visits like on the MPC.
@@ -335,9 +337,9 @@ pub struct View<'a> {
     pub var: (usize, crate::program::VarParam, u8),
     /// ZONE: the selected zone and the zone bounds of the selected pad's sound.
     pub zone: (usize, &'a [usize]),
-    /// EDIT: the operation, the pad new sounds go to, and TIME STRETCH's ratio in tenths of a
-    /// percent.
-    pub edit: (crate::edit::Op, usize, u32),
+    /// EDIT: the operation, the pad new sounds go to, TIME STRETCH's ratio in tenths of a
+    /// percent, and RESAMPLE's rate and bits.
+    pub edit: (crate::edit::Op, usize, u32, (u32, u32)),
     pub seq_edit: &'a SeqEdit,
     /// MIXER shows the FX SEND levels instead of level and pan.
     pub mixer_fx: bool,
@@ -1155,7 +1157,7 @@ pub fn rows(v: &View) -> Vec<Row> {
             rows
         }
         Screen::Edit(section) => {
-            let (op, to, ratio) = v.edit;
+            let (op, to, ratio, (rate, bits)) = v.edit;
             let what = match section {
                 Section::Trim => "St to End",
                 Section::Loop => "loop (To to End)",
@@ -1178,6 +1180,17 @@ pub fn rows(v: &View) -> Vec<Row> {
                 let last = (to + count - 1).min(crate::program::PADS - 1);
                 let range = if count > 1 { format!(" to {}", pad_name(last)) } else { String::new() };
                 rows.push(row(vec![t("To pad:"), f(Field::EditTo, pad_name(to)), t(range)], vec![]));
+            }
+            if op == crate::edit::Op::Resample {
+                rows.push(row(
+                    vec![
+                        t("New fs:"),
+                        f(Field::EditRate, format!("{rate}Hz")),
+                        t("  Bits:"),
+                        f(Field::EditBits, bits.to_string()),
+                    ],
+                    vec![],
+                ));
             }
             if op == crate::edit::Op::TimeStretch {
                 let r = row(

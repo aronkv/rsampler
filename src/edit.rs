@@ -20,13 +20,15 @@ pub enum Op {
     Reverse,
     /// A new sound of the section played longer or shorter at the same pitch, on `To pad`.
     TimeStretch,
+    /// A new sound of the section at a lower sample rate and bit depth, on `To pad`.
+    Resample,
     Normalize,
     /// Every zone to its own pad (ZONE only).
     Slice,
 }
 
 impl Op {
-    pub const ALL: [Op; 10] = [
+    pub const ALL: [Op; 11] = [
         Op::Discard,
         Op::LoopStEnd,
         Op::NewSound,
@@ -35,6 +37,7 @@ impl Op {
         Op::Silence,
         Op::Reverse,
         Op::TimeStretch,
+        Op::Resample,
         Op::Normalize,
         Op::Slice,
     ];
@@ -49,6 +52,7 @@ impl Op {
             Op::Silence => "SILENCE SECTION",
             Op::Reverse => "REVERSE SECTION",
             Op::TimeStretch => "TIME STRETCH",
+            Op::Resample => "RESAMPLE",
             Op::Normalize => "NORMALIZE SECTION",
             Op::Slice => "SLICE SOUND",
         }
@@ -56,7 +60,7 @@ impl Op {
 
     /// Whether the operation puts sounds on other pads, chosen with `To pad`.
     pub fn makes_sounds(self) -> bool {
-        matches!(self, Op::NewSound | Op::Slice | Op::TimeStretch)
+        matches!(self, Op::NewSound | Op::Slice | Op::TimeStretch | Op::Resample)
     }
 }
 
@@ -97,7 +101,7 @@ pub fn apply(snd: &mut Sound, op: Op, section: Range<usize>) {
                 frames[section].iter_mut().flatten().for_each(|x| *x /= peak);
             }
         }
-        Op::NewSound | Op::Slice | Op::TimeStretch | Op::Insert => return,
+        Op::NewSound | Op::Slice | Op::TimeStretch | Op::Resample | Op::Insert => return,
     }
     let len = frames.len().max(1);
     snd.end = snd.end.clamp(1, len);
@@ -164,6 +168,26 @@ pub fn stretch(x: &[[f32; 2]], ratio: f64, rate: u32) -> Vec<[f32; 2]> {
     }
     out.truncate(out_len);
     out
+}
+
+/// RESAMPLE: the sound as if sampled at `to_rate` with `bits` bits, without smoothing, for the
+/// grit of an old sampler. Each sample is held until the next one at the lower rate, so the
+/// length and pitch stay.
+pub fn crush(x: &[[f32; 2]], rate: u32, to_rate: u32, bits: u32) -> Vec<[f32; 2]> {
+    let step = rate as f64 / to_rate.clamp(1, rate) as f64;
+    let levels = (1u32 << (bits.clamp(1, 16) - 1)) as f32;
+    let mut held = [0.0; 2];
+    let mut next = 0.0;
+    x.iter()
+        .enumerate()
+        .map(|(i, f)| {
+            if i as f64 >= next {
+                held = f.map(|v| (v * levels).round() / levels);
+                next += step;
+            }
+            held
+        })
+        .collect()
 }
 
 /// Zones split a sound into `count` equal, back-to-back parts: zone `i` runs from `bounds[i]` to
@@ -252,6 +276,16 @@ mod tests {
         insert(&mut s, 2, &sound(2).frames);
         assert_eq!(left(&s), [0.0, 1.0, 0.0, 1.0, 2.0, 3.0]);
         assert_eq!((s.start, s.end, s.loop_to), (0, 6, 5));
+    }
+
+    #[test]
+    fn crush_holds_samples_and_rounds_levels() {
+        let x: Vec<[f32; 2]> = (0..8).map(|i| [i as f32 / 10.0; 2]).collect();
+        // Half the rate: every value held for two frames; 2 bits: steps of 0.5.
+        let y = crush(&x, 8, 4, 2);
+        let left: Vec<f32> = y.iter().map(|f| f[0]).collect();
+        assert_eq!(left, [0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 0.5]);
+        assert_eq!(crush(&x, 8, 8, 16).len(), 8);
     }
 
     #[test]
