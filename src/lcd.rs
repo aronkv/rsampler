@@ -63,6 +63,10 @@ pub enum Screen {
     },
     /// NEXT SEQ: the pads pick the next sequence.
     NextSeq,
+    /// MISC: PUNCH, TRANS and 2ND SEQ.
+    Punch,
+    Trans,
+    SecondSeq,
     Setup,
     Other,
 }
@@ -116,6 +120,7 @@ impl Screen {
                 ["", "", "", "", "", ""]
             }
             Screen::TrMute { .. } => ["", "", "", "", "", "SOLO"],
+            Screen::Punch | Screen::Trans | Screen::SecondSeq => ["PUNCH", "TRANS", "2ND SEQ", "", "", "ON/OFF"],
         }
     }
 
@@ -214,6 +219,12 @@ pub enum Field {
     EnvAttack,
     EnvDecay,
     EnvAmount,
+    PunchMode,
+    PunchFrom,
+    PunchTo,
+    TransTrack,
+    TransAmount,
+    SecondSeq,
 }
 
 /// The settings of the sequence EDIT screens, kept between visits like on the MPC.
@@ -550,6 +561,64 @@ pub fn rows(v: &View) -> Vec<Row> {
             if rows[5].left[0].text.is_empty() {
                 rows[5].left[0].text = "Pads pick the next sequence".to_owned();
             }
+            rows
+        }
+        Screen::Punch => {
+            use crate::audio::PunchMode;
+            let p = s.t.punch;
+            let seq = s.seq();
+            let mut time = vec![t("Time:")];
+            if p.mode != PunchMode::Out {
+                time.push(f(Field::PunchFrom, seq.bbt(p.from)));
+            }
+            if p.mode == PunchMode::InOut {
+                time.push(t(" - "));
+            }
+            if p.mode != PunchMode::In {
+                time.push(f(Field::PunchTo, seq.bbt(p.to)));
+            }
+            let mut rows = vec![
+                row(
+                    vec![t("PUNCH  Auto punch:"), f(Field::PunchMode, p.mode.label())],
+                    vec![t(format!("Punch:{}", on_off(p.on)))],
+                ),
+                row(time, vec![]),
+                row(vec![t("Records only inside the punch time while on")], vec![]),
+            ];
+            msg(&mut rows);
+            rows
+        }
+        Screen::Trans => {
+            let (on, track, by) = s.t.transpose;
+            let mut rows = vec![
+                row(
+                    vec![
+                        t("TRANSPOSE  Tr:"),
+                        f(Field::TransTrack, track.map_or("ALL".to_owned(), |t| format!("{:02}", t + 1))),
+                    ],
+                    vec![t(format!("Trans:{}", on_off(on)))],
+                ),
+                row(vec![t("Transpose:"), f(Field::TransAmount, format!("{by:+}"))], vec![]),
+                row(vec![t("Moves the MIDI out notes of the track while playing")], vec![]),
+            ];
+            msg(&mut rows);
+            rows
+        }
+        Screen::SecondSeq => {
+            let (on, sq) = s.t.second;
+            let used = if s.seqs[sq].tracks.iter().any(|t| !t.notes.is_empty()) { "" } else { " (unused)" };
+            let mut rows = vec![
+                row(
+                    vec![
+                        t("2ND SEQUENCE  Sq:"),
+                        f(Field::SecondSeq, format!("{:02}", sq + 1)),
+                        t(format!("-Sequence{:02}{used}", sq + 1)),
+                    ],
+                    vec![t(format!("2nd seq:{}", on_off(on)))],
+                ),
+                row(vec![t("Plays along with the sequence, at its tempo")], vec![]),
+            ];
+            msg(&mut rows);
             rows
         }
         Screen::Velo => {

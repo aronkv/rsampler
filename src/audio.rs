@@ -79,6 +79,54 @@ pub struct Transport {
     pub ext: ExtClock,
     /// MIDI notes sent from the sequence that still need their note off: status, note, tick.
     midi_offs: Vec<(u8, u8, u32)>,
+    pub punch: Punch,
+    /// 2ND SEQ: another sequence playing along, when on.
+    pub second: (bool, usize),
+    /// TRANS: when on, MIDI notes of a track (or all, `None`) move by this many semitones.
+    pub transpose: (bool, Option<usize>, i32),
+}
+
+/// MISC's PUNCH: with `on`, recording only happens inside the punch times.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Punch {
+    pub on: bool,
+    pub mode: PunchMode,
+    pub from: u32,
+    pub to: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PunchMode {
+    /// From `from` on.
+    In,
+    /// Until `to`.
+    Out,
+    /// From `from` until `to`.
+    InOut,
+}
+
+impl PunchMode {
+    pub const ALL: [PunchMode; 3] = [PunchMode::In, PunchMode::Out, PunchMode::InOut];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            PunchMode::In => "PUNCH IN ONLY",
+            PunchMode::Out => "PUNCH OUT ONLY",
+            PunchMode::InOut => "AUTO IN/OUT",
+        }
+    }
+}
+
+impl Punch {
+    /// Whether a recording at `tick` is kept.
+    pub fn allows(&self, tick: u32) -> bool {
+        !self.on
+            || match self.mode {
+                PunchMode::In => tick >= self.from,
+                PunchMode::Out => tick < self.to,
+                PunchMode::InOut => tick >= self.from && tick < self.to,
+            }
+    }
 }
 
 /// State of an incoming MIDI clock.
@@ -155,6 +203,9 @@ impl Shared {
                 sync: false,
                 ext: ExtClock::default(),
                 midi_offs: Vec::new(),
+                punch: Punch { on: false, mode: PunchMode::InOut, from: 0, to: 4 * crate::seq::PPQ * 4 },
+                second: (false, 1),
+                transpose: (false, None, 0),
             },
             master: 0.8,
             hits: Vec::new(),
@@ -346,7 +397,8 @@ impl Shared {
         let tick = tick as u32;
 
         let (seqi, track) = (self.t.seq, self.t.track);
-        if self.t.rec == RecMode::Rec {
+        let recording = recording && self.t.punch.allows(tick);
+        if self.t.rec == RecMode::Rec && recording {
             self.seqs[seqi].tracks[track].erase(tick, tick + 1, None);
         }
         if self.t.erase {
@@ -388,19 +440,29 @@ impl Shared {
                 }
             }
         }
-        for (ti, t) in self.seqs[seqi].tracks.iter().enumerate() {
-            if !t.on || self.t.solo.is_some_and(|s| s != ti) {
-                continue;
-            }
-            for n in t.range(tick, tick + 1) {
-                if let (Some(ch), Some(out)) = (t.out, &self.midi_out) {
-                    let note = n.pad + crate::midi::FIRST_NOTE;
-                    let _ = out.send([0x90 | ch, note, n.velocity]);
-                    self.t.midi_offs.push((0x80 | ch, note, (tick + n.duration.max(1)) % len));
+        // 2ND SEQ plays along from the start, looping on its own length.
+        let second =
+            Some(self.t.second).filter(|(on, s)| *on && *s != seqi).map(|(_, s)| (s, tick % self.seqs[s].len()));
+        for (si, at, main) in std::iter::once((seqi, tick, true)).chain(second.map(|(s, at)| (s, at, false))) {
+            for (ti, t) in self.seqs[si].tracks.iter().enumerate() {
+                if !t.on || (main && self.t.solo.is_some_and(|s| s != ti)) {
+                    continue;
                 }
-                voices.trigger(&self.pads, n.pad, n.velocity, n.var);
-                if self.pads[n.pad as usize].note_off() {
-                    self.t.note_offs.push((n.pad, (tick + n.duration) % len));
+                let shift = match self.t.transpose {
+                    (true, None, by) => by,
+                    (true, Some(tr), by) if tr == ti => by,
+                    _ => 0,
+                };
+                for n in t.range(at, at + 1) {
+                    if let (Some(ch), Some(out)) = (t.out, &self.midi_out) {
+                        let note = (n.pad as i32 + crate::midi::FIRST_NOTE as i32 + shift).clamp(0, 127) as u8;
+                        let _ = out.send([0x90 | ch, note, n.velocity]);
+                        self.t.midi_offs.push((0x80 | ch, note, (tick + n.duration.max(1)) % len));
+                    }
+                    voices.trigger(&self.pads, n.pad, n.velocity, n.var);
+                    if self.pads[n.pad as usize].note_off() {
+                        self.t.note_offs.push((n.pad, (tick + n.duration) % len));
+                    }
                 }
             }
         }
@@ -540,7 +602,8 @@ impl Shared {
                 if let Some(ch) = self.thru() {
                     self.send([0x90 | ch, pad + crate::midi::FIRST_NOTE, velocity]);
                 }
-                if self.t.playing && self.t.rec != RecMode::Off && self.t.tick >= 0.0 {
+                if self.t.playing && self.t.rec != RecMode::Off && self.t.tick >= 0.0 && self.t.punch.allows(self.now())
+                {
                     let (now, len) = (self.now(), self.seq().len());
                     let tick = quantize(now, self.grid(), self.t.swing, len);
                     self.t.pending.push((Note { tick, pad, velocity, duration: 0, var }, Some(now)));
@@ -965,7 +1028,7 @@ pub fn bounce(live: &Shared, song: bool) -> Shared {
     s.pads = live.pads.clone();
     s.seqs = live.seqs.clone();
     s.master = live.master;
-    (s.t.seq, s.t.solo) = (live.t.seq, live.t.solo);
+    (s.t.seq, s.t.solo, s.t.second) = (live.t.seq, live.t.solo, live.t.second);
     s.song = Song { steps: live.song.steps.clone(), looping: false };
     if song {
         s.play_song(0);
@@ -1486,6 +1549,40 @@ mod tests {
         rms(&mut s, &mut v, 12_000);
         let closed = rms(&mut s, &mut v, 1_000);
         assert!(open > closed * 3.0, "open {open}, closed {closed}");
+    }
+
+    #[test]
+    fn punch_keeps_only_hits_inside_the_window() {
+        let (mut s, mut v) = with_kit(48_000);
+        s.t.count_in = false;
+        s.t.punch = Punch { on: true, mode: PunchMode::InOut, from: 96, to: 192 };
+        s.toggle_rec(RecMode::Overdub);
+        s.play(true);
+        // Hits at ticks 10, 110 and 210 (250 frames a tick at 120 BPM): only 110 is inside.
+        for _ in 0..3 {
+            run(&mut s, &mut v, 250 * 10);
+            s.hits.push(Hit::Press { pad: 1, velocity: 100, var: None });
+            run(&mut s, &mut v, 250 * 90);
+            s.hits.push(Hit::Release { pad: 1 });
+        }
+        s.stop();
+        let ticks: Vec<_> = s.seq().tracks[0].notes.iter().map(|n| n.tick).collect();
+        // The hit at 110 lands on the 1/16 line at 120.
+        assert_eq!(ticks, [120]);
+    }
+
+    #[test]
+    fn second_sequence_plays_along() {
+        let (mut s, mut v) = with_kit(48_000);
+        // The main sequence is empty; sequence 2 has a kick at the start.
+        s.seqs[1].tracks[0].insert(Note { tick: 0, pad: 0, velocity: 127, duration: 10, var: None });
+        s.play(true);
+        assert_eq!(run(&mut s, &mut v, 2_000), 0.0);
+        s.stop();
+        s.stop();
+        s.t.second = (true, 1);
+        s.play(true);
+        assert!(run(&mut s, &mut v, 2_000) > 0.1);
     }
 
     #[test]

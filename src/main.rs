@@ -699,6 +699,29 @@ impl App {
                 Field::EnvAttack => p.fenv.attack = step(p.fenv.attack, 0, 100),
                 Field::EnvDecay => p.fenv.decay = step(p.fenv.decay, 0, 100),
                 Field::EnvAmount => p.fenv.amount = step(p.fenv.amount, 0, 100),
+                Field::PunchMode => {
+                    let all = audio::PunchMode::ALL;
+                    let i = all.iter().position(|m| *m == s.t.punch.mode).unwrap_or(0) as i32;
+                    s.t.punch.mode = all[(i + d).clamp(0, 2) as usize];
+                }
+                // Times move by bars, or by beats with Shift.
+                Field::PunchFrom | Field::PunchTo => {
+                    let unit = if fine { s.seq().ticks_per_beat() } else { s.seq().ticks_per_bar() } as i64;
+                    let len = s.seq().len() as i64;
+                    let pu = &mut s.t.punch;
+                    if field == Field::PunchFrom {
+                        pu.from = (pu.from as i64 + d as i64 * unit).clamp(0, pu.to as i64 - 1).max(0) as u32;
+                    } else {
+                        pu.to = (pu.to as i64 + d as i64 * unit).clamp(pu.from as i64 + 1, len) as u32;
+                    }
+                }
+                Field::TransTrack => {
+                    // −1 stands for ALL.
+                    let v = (s.t.transpose.1.map_or(-1, |t| t as i32) + d).clamp(-1, seq::TRACKS as i32 - 1);
+                    s.t.transpose.1 = (v >= 0).then_some(v as usize);
+                }
+                Field::TransAmount => s.t.transpose.2 = (s.t.transpose.2 + d).clamp(-12, 12),
+                Field::SecondSeq => s.t.second.1 = step(s.t.second.1 as u32, 0, seq::SEQUENCES as u32 - 1) as usize,
                 Field::Pan => p.pan = (p.pan + d).clamp(-50, 50),
                 Field::Start | Field::End | Field::LoopTo | Field::LoopLen | Field::Looping => {
                     if let Some(snd) = &mut p.sound {
@@ -1287,6 +1310,12 @@ impl App {
             (Screen::Load(_), 1) => self.open_save(),
             (Screen::Load(_), 4) => self.preview(),
             // SOLO: the next pad solos its track; with a track soloed it goes back to all.
+            (Screen::Punch | Screen::Trans | Screen::SecondSeq, 0) => self.set_screen(Screen::Punch),
+            (Screen::Punch | Screen::Trans | Screen::SecondSeq, 1) => self.set_screen(Screen::Trans),
+            (Screen::Punch | Screen::Trans | Screen::SecondSeq, 2) => self.set_screen(Screen::SecondSeq),
+            (Screen::Punch, 5) => self.with(|s| s.t.punch.on ^= true),
+            (Screen::Trans, 5) => self.with(|s| s.t.transpose.0 ^= true),
+            (Screen::SecondSeq, 5) => self.with(|s| s.t.second.0 ^= true),
             (Screen::TrMute { .. }, 5) => {
                 if self.with(|s| s.t.solo.take().is_none()) {
                     self.screen = Screen::TrMute { solo: true };
@@ -1455,6 +1484,16 @@ impl App {
             "PROGRAM" => self.set_screen(Screen::Program),
             "MIXER" => self.set_screen(Screen::Mixer),
             "SETUP" => self.set_screen(Screen::Setup),
+            "MISC" => {
+                // The punch times stay inside the sequence.
+                self.with(|s| {
+                    let len = s.seq().len();
+                    let p = &mut s.t.punch;
+                    p.to = p.to.min(len);
+                    p.from = p.from.min(p.to - 1);
+                });
+                self.set_screen(Screen::Punch);
+            }
             "OTHER" => self.set_screen(Screen::Other),
             "SONG" => {
                 self.set_screen(Screen::Song);
@@ -1617,6 +1656,7 @@ impl App {
                 Key::Z if modifiers.ctrl => Action::Undo,
                 Key::S if modifiers.ctrl => Action::Save,
                 Key::Num1 if command => Action::Mode("SONG"),
+                Key::Num2 if command => Action::Mode("MISC"),
                 Key::Num3 if command => Action::Mode("LOAD"),
                 Key::Num4 if command => Action::Mode("SAMPLE"),
                 Key::Num5 if command => Action::Mode("TRIM"),

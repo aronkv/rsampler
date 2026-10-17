@@ -53,7 +53,7 @@ installing.
 ## Usage
 
 [Pads](#pads) · [NOTE VARIATION](#note-variation) · [Recording](#recording-a-sequence) ·
-[EDIT](#edit-copying-bars-and-notes) · [SONG](#song) · [STEP EDIT](#step-edit) · [PROGRAM](#program-how-each-pad-plays) · [MIXER](#mixer) ·
+[EDIT](#edit-copying-bars-and-notes) · [MISC](#misc-punch-transpose-and-a-second-sequence) · [SONG](#song) · [STEP EDIT](#step-edit) · [PROGRAM](#program-how-each-pad-plays) · [MIXER](#mixer) ·
 [TRIM](#trim-loop-and-zone-editing-a-sound) · [Loading samples](#loading-samples) · [SAMPLE](#sample-recording-from-the-input) ·
 [Projects](#saving-and-loading-projects) · [MIDI](#midi) · [Shortcuts](#keyboard-shortcuts)
 
@@ -185,6 +185,19 @@ first bar), and the bars after them move back. Both sequences need the same time
 | COPY     | Copies the notes to `To sq` / `tr` from `Start`, `Copies` times one after another. REPLACE clears that stretch first, MERGE adds to it |
 | DURATION | Changes their length: `Mode` ADD VALUE, SUB VALUE, MULTI VAL% or SET TO VAL, by `Value` ticks (or percent) |
 | VELOCITY | Changes their velocity the same way, between 1 and 127                        |
+
+### MISC: punch, transpose and a second sequence
+
+The blue **2 / MISC** key (`Ctrl+2`) has three pages, **PUNCH** (F1), **TRANS** (F2) and
+**2ND SEQ** (F3); **ON/OFF** (F6) switches the one shown on or off.
+
+- **PUNCH** limits recording to a stretch of the sequence, so a take can be redone without
+  touching the bars around it: `Auto punch` PUNCH IN ONLY records from `Time` on, PUNCH OUT ONLY
+  until it, AUTO IN/OUT only between the two times. Outside them the sequence just plays.
+- **TRANS** moves the MIDI out notes of one track (`Tr`) or ALL by up to an octave either way while
+  playing, for playing a bass line on an external synth in another key. Pads are not affected.
+- **2ND SEQ** plays another sequence (`Sq`) along with the current one, looping on its own length,
+  for example drums in one sequence and a bassline in another. WAV export includes it.
 
 ### SONG
 
@@ -404,13 +417,12 @@ shows the version and the output sample rate.
 | `F7` / `F8`                 | FULL LEVEL / 16 LEVELS       |
 | `Tab` / `Shift+Tab`         | Next / previous PAD BANK     |
 | `F9` / `F10`                | NEXT SEQ / TRACK MUTE        |
-| `Ctrl+1` / `3`–`9`          | SONG / LOAD, SAMPLE, TRIM, PROGRAM, SETUP, MIXER, OTHER |
+| `Ctrl+1`–`9`                | SONG, MISC, LOAD, SAMPLE, TRIM, PROGRAM, SETUP, MIXER, OTHER |
 | `Esc`                       | MAIN SCREEN                  |
 
 ### Not there yet
 
 - Windows-specific testing
-- The MISC mode
 - INSERT SOUND in the EDIT window
 - Loading the MPC's `.SEQ`, `.APS` and `.ALL` files; its `.SND` sounds, `.PGM` programs and
   `.MID` sequences already load
