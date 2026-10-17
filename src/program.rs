@@ -16,12 +16,16 @@ pub struct Sound {
     /// Playback range in frames; TRIM edits these.
     pub start: usize,
     pub end: usize,
+    /// LOOP: with `looping` on, playback jumps back to `loop_to` from the end for as long as the
+    /// note is held.
+    pub loop_to: usize,
+    pub looping: bool,
 }
 
 impl Sound {
     pub fn new(name: impl Into<String>, frames: Frames) -> Self {
         let end = frames.len();
-        Self { name: name.into(), frames, start: 0, end }
+        Self { name: name.into(), frames, start: 0, end, loop_to: 0, looping: false }
     }
 }
 
@@ -147,6 +151,11 @@ impl Default for Pad {
 }
 
 impl Pad {
+    /// A looping sound plays until its note ends, whatever `overlap` says, as on the MPC.
+    pub fn note_off(&self) -> bool {
+        self.overlap == Overlap::NoteOff || self.sound.as_ref().is_some_and(|s| s.looping)
+    }
+
     /// The pads a hit plays: itself, plus its SIMULT layers, or the pad VEL SW picks.
     pub fn targets(&self, pad: u8, velocity: u8) -> impl Iterator<Item = u8> {
         let (first, layers) = match self.generation {

@@ -89,6 +89,10 @@ struct SoundFile {
     frames: usize,
     start: usize,
     end: usize,
+    #[serde(default)]
+    loop_to: usize,
+    #[serde(default)]
+    looping: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -128,6 +132,8 @@ fn describe(s: &Shared) -> ProjectFile {
             frames: snd.frames.len(),
             start: snd.start,
             end: snd.end,
+            loop_to: snd.loop_to,
+            looping: snd.looping,
         });
         let file = pad_file(i, p, sound);
         // Pads left at their defaults are not written.
@@ -301,7 +307,8 @@ pub fn load(root: &Path, rate: u32) -> Result<Loaded, String> {
                 let ratio = len as f64 / snd.frames.max(1) as f64;
                 let start = ((snd.start as f64 * ratio) as usize).min(len - 1);
                 let end = ((snd.end as f64 * ratio).round() as usize).clamp(start + 1, len);
-                Some(Sound { name: snd.name, frames, start, end })
+                let loop_to = ((snd.loop_to as f64 * ratio) as usize).min(end - 1);
+                Some(Sound { name: snd.name, frames, start, end, loop_to, looping: snd.looping })
             }
             None => None,
         };
@@ -428,6 +435,8 @@ mod tests {
             s.pads[pad].sound = Some(sound);
         }
         s.pads[0].tune = -35;
+        let kick = s.pads[0].sound.as_mut().unwrap();
+        (kick.loop_to, kick.looping) = (500, true);
         s.pads[1].overlap = Overlap::NoteOff;
         s.pads[2].mutes = [Some(3), None];
         s.pads[2].generation = Generation::VelSw;
@@ -462,6 +471,8 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
 
         assert_eq!(t.pads[0].tune, -35);
+        let kick = t.pads[0].sound.as_ref().unwrap();
+        assert_eq!((kick.loop_to, kick.looping), (500, true));
         assert_eq!(t.pads[1].overlap, Overlap::NoteOff);
         assert_eq!(t.pads[2].mutes, [Some(3), None]);
         assert_eq!(

@@ -41,6 +41,10 @@ pub enum Screen {
     Program,
     Mixer,
     Trim,
+    Loop,
+    Zone,
+    /// The EDIT window, working on the section of the screen it was opened from.
+    Edit(Section),
     Step,
     Sample,
     Song,
@@ -48,6 +52,36 @@ pub enum Screen {
     Assign,
     Setup,
     Other,
+}
+
+/// Which part of the sound EDIT works on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Section {
+    /// St–End.
+    Trim,
+    /// Loop point to End.
+    Loop,
+    /// The selected zone.
+    Zone,
+}
+
+impl Section {
+    /// The section of the TRIM, LOOP or ZONE screen.
+    pub fn of(screen: &Screen) -> Section {
+        match screen {
+            Screen::Loop => Section::Loop,
+            Screen::Zone => Section::Zone,
+            _ => Section::Trim,
+        }
+    }
+
+    pub fn screen(self) -> Screen {
+        match self {
+            Section::Trim => Screen::Trim,
+            Section::Loop => Screen::Loop,
+            Section::Zone => Screen::Zone,
+        }
+    }
 }
 
 impl Screen {
@@ -59,7 +93,8 @@ impl Screen {
             Screen::Save(_) => ["UP DIR", "", "", "MIDI", "NAME", "DO IT"],
             Screen::Program => ["LOAD", "TRIM", "MIXER", "", "", "CLEAR"],
             Screen::Mixer => ["", "", "", "", "", "RESET"],
-            Screen::Trim => ["PLAY", "", "", "", "", "RESET"],
+            Screen::Trim | Screen::Loop | Screen::Zone => ["TRIM", "LOOP", "ZONE", "RESET", "EDIT", "PLAY X"],
+            Screen::Edit(_) => ["", "", "", "CANCEL", "DO IT", ""],
             Screen::Sample => ["", "", "", "", "", "REC"],
             Screen::Song => ["INSERT", "DELETE", "", "", "", ""],
             Screen::Assign | Screen::Setup | Screen::Other => ["", "", "", "", "", ""],
@@ -69,7 +104,7 @@ impl Screen {
     /// Mixer and TRIM draw graphics below their first rows.
     pub fn text_rows(&self) -> usize {
         match self {
-            Screen::Mixer | Screen::Trim => 2,
+            Screen::Mixer | Screen::Trim | Screen::Loop | Screen::Zone => 2,
             _ => 6,
         }
     }
@@ -125,6 +160,15 @@ pub enum Field {
     Also2,
     Switch1,
     Switch2,
+    LoopTo,
+    LoopLen,
+    Looping,
+    ZoneCount,
+    Zone,
+    ZoneStart,
+    ZoneEnd,
+    EditOp,
+    EditTo,
 }
 
 pub struct Seg {
@@ -186,6 +230,10 @@ pub struct View<'a> {
     pub song_step: usize,
     /// NOTE VARIATION: assigned pad, parameter and slider position.
     pub var: (usize, crate::program::VarParam, u8),
+    /// ZONE: the selected zone and the zone bounds of the selected pad's sound.
+    pub zone: (usize, &'a [usize]),
+    /// EDIT: the operation and the pad new sounds go to.
+    pub edit: (crate::edit::Op, usize),
 }
 
 /// What the SAMPLE screen shows.
@@ -573,6 +621,73 @@ pub fn rows(v: &View) -> Vec<Row> {
                     })],
                 ),
             ]
+        }
+        Screen::Loop => {
+            let secs = |frames: usize| format!("{:.3}s", frames as f32 / s.rate as f32);
+            let (to, end, looping) =
+                s.pads[v.pad].sound.as_ref().map_or((0, 0, false), |snd| (snd.loop_to, snd.end, snd.looping));
+            vec![
+                row(
+                    vec![t("LOOP  Pad:"), f(Field::Pad, pad_name(v.pad)), t(format!("  {}", sound_name(v)))],
+                    vec![t("Loop:"), f(Field::Looping, on_off(looping))],
+                ),
+                row(
+                    vec![
+                        t("To:"),
+                        f(Field::LoopTo, secs(to)),
+                        t(" Lngth:"),
+                        f(Field::LoopLen, secs(end.saturating_sub(to))),
+                        t(" End:"),
+                        f(Field::End, secs(end)),
+                    ],
+                    vec![t(v.message)],
+                ),
+            ]
+        }
+        Screen::Zone => {
+            let secs = |frames: usize| format!("{:.3}s", frames as f32 / s.rate as f32);
+            let (zone, bounds) = v.zone;
+            let count = bounds.len().saturating_sub(1);
+            let (st, end) = (bounds.get(zone).copied().unwrap_or(0), bounds.get(zone + 1).copied().unwrap_or(0));
+            vec![
+                row(
+                    vec![t("ZONE  Pad:"), f(Field::Pad, pad_name(v.pad)), t(format!("  {}", sound_name(v)))],
+                    vec![t("Zones:"), f(Field::ZoneCount, format!("{count:2}"))],
+                ),
+                row(
+                    vec![
+                        t("Zone:"),
+                        f(Field::Zone, format!("{:2}", zone + 1)),
+                        t("  St:"),
+                        f(Field::ZoneStart, secs(st)),
+                        t("  End:"),
+                        f(Field::ZoneEnd, secs(end)),
+                    ],
+                    vec![t(v.message)],
+                ),
+            ]
+        }
+        Screen::Edit(section) => {
+            let (op, to) = v.edit;
+            let what = match section {
+                Section::Trim => "St to End",
+                Section::Loop => "loop (To to End)",
+                Section::Zone if op == crate::edit::Op::Slice => "every zone",
+                Section::Zone => "the selected zone",
+            };
+            let mut rows = vec![
+                row(vec![t(format!("EDIT SOUND  {} {}", pad_name(v.pad), sound_name(v)))], vec![]),
+                row(vec![t(format!("Section: {what}"))], vec![]),
+                row(vec![t("Edit:"), f(Field::EditOp, op.label())], vec![]),
+            ];
+            if op.makes_sounds() {
+                let count = if op == crate::edit::Op::Slice { v.zone.1.len().saturating_sub(1) } else { 1 };
+                let last = (to + count - 1).min(crate::program::PADS - 1);
+                let range = if count > 1 { format!(" to {}", pad_name(last)) } else { String::new() };
+                rows.push(row(vec![t("To pad:"), f(Field::EditTo, pad_name(to)), t(range)], vec![]));
+            }
+            msg(&mut rows);
+            rows
         }
         Screen::Load(b) | Screen::Save(b) => {
             let saving = matches!(v.screen, Screen::Save(_));

@@ -15,8 +15,19 @@ const MAX_VOICES: usize = 64;
 
 #[derive(Debug, PartialEq)]
 pub enum Hit {
-    Press { pad: u8, velocity: u8, var: Variation },
-    Release { pad: u8 },
+    Press {
+        pad: u8,
+        velocity: u8,
+        var: Variation,
+    },
+    Release {
+        pad: u8,
+    },
+    /// PLAY X: plays part of a pad's sound as it is, once.
+    Audition {
+        pad: u8,
+        range: std::ops::Range<usize>,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -379,7 +390,7 @@ impl Shared {
                     self.t.midi_offs.push((0x80 | ch, note, (tick + n.duration.max(1)) % len));
                 }
                 voices.trigger(&self.pads, n.pad, n.velocity, n.var);
-                if self.pads[n.pad as usize].overlap == Overlap::NoteOff {
+                if self.pads[n.pad as usize].note_off() {
                     self.t.note_offs.push((n.pad, (tick + n.duration) % len));
                 }
             }
@@ -526,6 +537,11 @@ impl Shared {
                     self.t.pending.push((Note { tick, pad, velocity, duration: 0, var }, Some(now)));
                 }
             }
+            Hit::Audition { pad, range } => {
+                if let Some(sound) = &self.pads[pad as usize].sound {
+                    voices.audition(sound, range);
+                }
+            }
             Hit::Release { pad } => {
                 self.t.held[pad as usize] = None;
                 self.t.erasing[pad as usize] = false;
@@ -536,7 +552,7 @@ impl Shared {
                 // With SIMULT or VEL SW the hit may be sounding on the other pads too.
                 let also = self.pads[pad as usize].also;
                 for target in std::iter::once(pad).chain(also.into_iter().flatten()) {
-                    if self.pads.get(target as usize).is_some_and(|p| p.overlap == Overlap::NoteOff) {
+                    if self.pads.get(target as usize).is_some_and(Pad::note_off) {
                         voices.release(target);
                     }
                 }
@@ -665,6 +681,7 @@ struct Voice {
     frames: Frames,
     pos: f64,
     end: f64,
+    loop_to: Option<f64>,
     rate: f64,
     gain: [f32; 2],
     age: u32,
@@ -681,6 +698,8 @@ struct Voice {
 }
 
 const CUT_FRAMES: u32 = 128;
+/// Voice owner for PLAY X, which is no pad.
+const AUDITION: u8 = u8::MAX - 1;
 
 impl Voice {
     fn level(&mut self) -> f32 {
@@ -705,7 +724,7 @@ impl Voice {
     }
 
     fn done(&self) -> bool {
-        self.pos >= self.end
+        (self.pos >= self.end && self.loop_to.is_none())
             || self.cut == Some(0)
             || self.release.is_some_and(|(_, len, i)| i >= len)
             || self.decay_tau.is_some_and(|tau| self.age > self.attack + (tau * 7.0) as u32)
@@ -727,6 +746,11 @@ impl Voice {
             out[ch] = x * g * self.gain[ch];
         }
         self.pos += self.rate;
+        if let Some(to) = self.loop_to
+            && self.pos >= self.end
+        {
+            self.pos = to + (self.pos - self.end);
+        }
         self.age += 1;
         out
     }
@@ -779,7 +803,7 @@ impl Voices {
         for m in p.mutes.iter().flatten() {
             self.cut(*m);
         }
-        if p.overlap != Overlap::Poly {
+        if p.overlap != Overlap::Poly || p.note_off() {
             self.cut(pad);
         }
         if self.voices.len() >= MAX_VOICES
@@ -790,6 +814,14 @@ impl Voices {
         self.voices.push(voice(&p.varied(var), sound, pad, velocity, self.rate));
     }
 
+    fn audition(&mut self, sound: &Sound, range: std::ops::Range<usize>) {
+        self.cut(AUDITION);
+        let end = range.end.min(sound.frames.len());
+        let part = Sound { start: range.start.min(end.saturating_sub(1)), end, looping: false, ..sound.clone() };
+        let plain = Pad { decay: 0, ..Pad::default() };
+        self.voices.push(voice(&plain, &part, AUDITION, 127, self.rate));
+    }
+
     fn click(&mut self, accent: bool) {
         let frames = self.clicks[accent as usize].clone();
         let end = frames.len() as f64;
@@ -798,6 +830,7 @@ impl Voices {
             frames,
             pos: 0.0,
             end,
+            loop_to: None,
             rate: 1.0,
             gain: [1.0, 1.0],
             age: 0,
@@ -831,7 +864,9 @@ fn voice(p: &Pad, sound: &Sound, pad: u8, velocity: u8, rate: u32) -> Voice {
     // that long before the end of the sound (0 stops it abruptly).
     let decay = secs(p.decay, 2.0);
     let decay_tau = p.decay_from_start.then(|| decay.max(r * 0.005));
-    let fade_from = (!p.decay_from_start && decay >= 1.0).then(|| (end - decay as f64).max(start));
+    let loop_to = sound.looping.then(|| (sound.loop_to as f64).clamp(start, end - 1.0));
+    // A loop never reaches its end, so it only fades when let go.
+    let fade_from = (!p.decay_from_start && decay >= 1.0 && loop_to.is_none()).then(|| (end - decay as f64).max(start));
     // Equal-power pan, normalised so the centre stays at full level.
     let angle = (p.pan + 50) as f32 / 100.0 * PI / 2.0;
     let level = p.level as f32 / 100.0 * velocity as f32 / 127.0 * std::f32::consts::SQRT_2;
@@ -842,6 +877,7 @@ fn voice(p: &Pad, sound: &Sound, pad: u8, velocity: u8, rate: u32) -> Voice {
         frames: sound.frames.clone(),
         pos: start,
         end,
+        loop_to,
         rate: 2f64.powf(p.tune as f64 / 120.0),
         gain: [angle.cos() * level, angle.sin() * level],
         age: 0,
@@ -1241,6 +1277,26 @@ mod tests {
         s.hits.push(Hit::Release { pad: 0 });
         // Well past any release time, the kick is still sounding.
         assert!(run(&mut s, &mut v, 4_800) > 0.1);
+    }
+
+    #[test]
+    fn a_loop_holds_until_release_and_play_x_plays_once() {
+        let (mut s, mut v) = with_kit(48_000);
+        let len = {
+            let snd = s.pads[0].sound.as_mut().unwrap();
+            (snd.loop_to, snd.looping) = (snd.end / 2, true);
+            snd.end
+        };
+        // Poly, but a looping sound still waits for its release.
+        s.hits.push(Hit::Press { pad: 0, velocity: 100, var: None });
+        run(&mut s, &mut v, len * 3);
+        assert_eq!(v.voices.len(), 1);
+        s.hits.push(Hit::Release { pad: 0 });
+        run(&mut s, &mut v, 48_000);
+        assert!(v.voices.is_empty());
+        s.hits.push(Hit::Audition { pad: 0, range: 0..100 });
+        run(&mut s, &mut v, 101);
+        assert!(v.voices.is_empty());
     }
 
     #[test]

@@ -14,6 +14,8 @@ pub struct Snd {
     pub rate: u32,
     pub start: usize,
     pub end: usize,
+    pub loop_to: usize,
+    pub looping: bool,
     /// Tenths of a semitone, like a pad's `Tune`.
     pub tune: i32,
 }
@@ -26,7 +28,7 @@ pub fn parse(b: &[u8]) -> Result<Snd, String> {
     let name = String::from_utf8_lossy(b[2..19].split(|c| *c == 0).next().unwrap_or_default()).trim().to_owned();
     let tune = b[20] as i8 as i32;
     let stereo = b[21] & 1 == 1;
-    let (start, end, count) = (u32_at(22), u32_at(26), u32_at(30));
+    let (start, end, count, loop_len) = (u32_at(22), u32_at(26), u32_at(30), u32_at(34));
     let rate = u16::from_le_bytes([b[40], b[41]]) as u32;
     let channels = if stereo { 2 } else { 1 };
     let data = &b[HEADER..];
@@ -41,7 +43,9 @@ pub fn parse(b: &[u8]) -> Result<Snd, String> {
         })
         .collect();
     let end = end.clamp(1, count.max(1));
-    Ok(Snd { name, frames, rate, start: start.min(end - 1), end, tune: tune.clamp(-120, 120) })
+    // The loop is stored as its length, back from the end.
+    let (loop_to, looping) = (end.saturating_sub(loop_len), b[38] & 1 == 1);
+    Ok(Snd { name, frames, rate, start: start.min(end - 1), end, loop_to, looping, tune: tune.clamp(-120, 120) })
 }
 
 /// Loads a `.SND` file resampled to `rate`, keeping its trim in proportion, and returns its tune.
@@ -57,7 +61,8 @@ pub fn load(path: &Path, rate: u32) -> Result<(Sound, i32), String> {
     } else {
         snd.name
     };
-    Ok((Sound { name, frames: frames.into(), start, end }, snd.tune))
+    let loop_to = scale(snd.loop_to).min(end - 1);
+    Ok((Sound { name, frames: frames.into(), start, end, loop_to, looping: snd.looping }, snd.tune))
 }
 
 #[cfg(test)]
@@ -68,10 +73,10 @@ mod tests {
         let mut b = vec![0x01, 0x04];
         b.extend(b"kick1\0\0\0\0\0\0\0\0\0\0\0\0");
         b.extend([100, tune as u8, stereo as u8]);
-        for v in [start, end, frames, 0] {
+        for v in [start, end, frames, 2] {
             b.extend(v.to_le_bytes());
         }
-        b.extend([0, 4]);
+        b.extend([stereo as u8, 4]);
         b.extend(44_100u16.to_le_bytes());
         b
     }
@@ -85,6 +90,8 @@ mod tests {
         let snd = parse(&b).unwrap();
         assert_eq!(snd.name, "kick1");
         assert_eq!((snd.rate, snd.start, snd.end, snd.tune), (44_100, 1, 3, -15));
+        // Loop on, two frames long: from frame 1.
+        assert_eq!((snd.loop_to, snd.looping), (1, true));
         let f = |v: i16| v as f32 / 32768.0;
         assert_eq!(snd.frames, [[f(100), f(-100)], [f(200), f(-200)], [f(300), f(-300)]]);
     }
@@ -94,6 +101,7 @@ mod tests {
         let mut b = header(false, 2, 0, 2, 0);
         b.extend([1, 0, 2, 0]);
         assert_eq!(parse(&b).unwrap().frames.len(), 2);
+        assert!(!parse(&b).unwrap().looping);
         assert!(parse(&b[..b.len() - 1]).is_err());
         assert!(parse(b"RIFF....").is_err());
     }

@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio;
+mod edit;
 mod lcd;
 mod midi;
 mod midifile;
@@ -19,7 +20,7 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Align2, Color32, Key, Rect, Sense, Stroke, StrokeKind, Ui, vec2};
 
 use audio::{Engine, Hit, RecMode, Shared};
-use lcd::{Browser, Field, Row, Screen, View};
+use lcd::{Browser, Field, Row, Screen, Section, View};
 use panel::*;
 use program::{Overlap, PADS, Sound};
 use seq::TIMING;
@@ -129,6 +130,13 @@ struct App {
     samples_taken: u32,
     midi: midi::Midi,
     midi_scanned: Instant,
+    /// ZONE: bounds of the zones of `zones_pad`'s sound, and the selected zone.
+    zones: Vec<usize>,
+    zones_pad: usize,
+    zone: usize,
+    edit_op: edit::Op,
+    /// EDIT: the first pad new sounds go to.
+    edit_to: usize,
 }
 
 /// Something the keyboard asked for this frame.
@@ -210,6 +218,12 @@ impl App {
             midi,
             // Scan for MIDI inputs on the first frame.
             midi_scanned: Instant::now() - Duration::from_secs(60),
+            // The MPC starts with 16 zones.
+            zones: edit::zones(0, 16),
+            zones_pad: 0,
+            zone: 0,
+            edit_op: edit::Op::Discard,
+            edit_to: 16,
         }
     }
 
@@ -330,6 +344,8 @@ impl App {
             step: self.step,
             song_step: self.song_step,
             var: (self.var_pad, self.var_param, self.var_value),
+            zone: (self.zone, &self.zones),
+            edit: (self.edit_op, self.edit_to),
             sample: self.input.as_ref().map(|input| {
                 let c = input.lock();
                 lcd::SampleView {
@@ -429,6 +445,29 @@ impl App {
         }
         let song_step = self.song_step;
         match field {
+            Field::ZoneCount => {
+                let count = (self.zones.len() as i32 - 1 + d).clamp(1, 16) as usize;
+                self.zones = edit::zones(self.zones.last().copied().unwrap_or(0), count);
+                self.zone = self.zone.min(count - 1);
+                return;
+            }
+            Field::Zone => return self.zone = (self.zone as i32 + d).clamp(0, self.zones.len() as i32 - 2) as usize,
+            Field::ZoneStart | Field::ZoneEnd => {
+                let i = self.zone + (field == Field::ZoneEnd) as usize;
+                let len = self.zones.last().copied().unwrap_or(0);
+                let to = self.zones[i] as i64 + d as i64 * frame_step(len, fine);
+                return edit::move_bound(&mut self.zones, i, to, len);
+            }
+            Field::EditOp => {
+                // SLICE SOUND only works from the ZONE screen.
+                let ops: Vec<_> = edit::Op::ALL
+                    .into_iter()
+                    .filter(|op| *op != edit::Op::Slice || matches!(self.screen, Screen::Edit(Section::Zone)))
+                    .collect();
+                let i = ops.iter().position(|o| *o == self.edit_op).unwrap_or(0) as i32;
+                return self.edit_op = ops[(i + d).clamp(0, ops.len() as i32 - 1) as usize];
+            }
+            Field::EditTo => return self.edit_to = (self.edit_to as i32 + d).clamp(0, PADS as i32 - 1) as usize,
             Field::VarPad => return self.var_pad = (self.var_pad as i32 + d).clamp(0, PADS as i32 - 1) as usize,
             Field::VarParam => {
                 let all = program::VarParam::ALL;
@@ -545,16 +584,20 @@ impl App {
                 }
                 Field::Level => p.level = step(p.level, 0, 100),
                 Field::Pan => p.pan = (p.pan + d).clamp(-50, 50),
-                Field::Start | Field::End => {
+                Field::Start | Field::End | Field::LoopTo | Field::LoopLen | Field::Looping => {
                     if let Some(snd) = &mut p.sound {
                         let len = snd.frames.len();
-                        let unit = if fine { 1 } else { (len / 500).max(1) } as i64;
-                        let moved = |v: usize| (v as i64 + d as i64 * unit).clamp(0, len as i64) as usize;
-                        if field == Field::Start {
-                            snd.start = moved(snd.start).min(snd.end.saturating_sub(1));
-                        } else {
-                            snd.end = moved(snd.end).max(snd.start + 1);
+                        let unit = frame_step(len, fine);
+                        let moved = |v: usize, d: i32| (v as i64 + d as i64 * unit).clamp(0, len as i64) as usize;
+                        match field {
+                            Field::Start => snd.start = moved(snd.start, d).min(snd.end.saturating_sub(1)),
+                            Field::End => snd.end = moved(snd.end, d).max(snd.start + 1),
+                            Field::LoopTo => snd.loop_to = moved(snd.loop_to, d),
+                            // A longer loop starts earlier.
+                            Field::LoopLen => snd.loop_to = moved(snd.loop_to, -d),
+                            _ => snd.looping ^= true,
                         }
+                        snd.loop_to = snd.loop_to.min(snd.end - 1);
                     }
                 }
                 Field::Pad
@@ -573,9 +616,74 @@ impl App {
                 | Field::TrackOut
                 | Field::ClockOut
                 | Field::Sync
-                | Field::KeyVelocity => {}
+                | Field::KeyVelocity
+                | Field::ZoneCount
+                | Field::Zone
+                | Field::ZoneStart
+                | Field::ZoneEnd
+                | Field::EditOp
+                | Field::EditTo => {}
             }
         });
+    }
+
+    /// Splits the selected pad's sound into fresh zones when the pad or its length changed.
+    fn sync_zones(&mut self) {
+        let len = self.with(|s| s.pads[self.pad].sound.as_ref().map_or(0, |snd| snd.frames.len()));
+        if self.zones_pad != self.pad || self.zones.last() != Some(&len) {
+            self.zones = edit::zones(len, self.zones.len().saturating_sub(1).max(1));
+            (self.zones_pad, self.zone) = (self.pad, 0);
+        }
+    }
+
+    /// The part of the selected pad's sound EDIT works on.
+    fn section(&self, section: Section) -> std::ops::Range<usize> {
+        self.with(|s| {
+            let Some(snd) = &s.pads[self.pad].sound else { return 0..0 };
+            match section {
+                Section::Trim => snd.start..snd.end,
+                Section::Loop => snd.loop_to.min(snd.end)..snd.end,
+                Section::Zone => self.zones[self.zone]..self.zones[self.zone + 1],
+            }
+        })
+    }
+
+    /// EDIT's DO IT.
+    fn do_edit(&mut self, from: Section) {
+        let (op, pad, to) = (self.edit_op, self.pad, self.edit_to);
+        let range = self.section(from);
+        let ranges = if op == edit::Op::Slice {
+            self.zones.windows(2).map(|w| w[0]..w[1]).collect()
+        } else {
+            vec![range.clone()]
+        };
+        let msg = self.with(|s| {
+            let Some(snd) = s.pads[pad].sound.clone() else { return "No sound on this pad".to_owned() };
+            if !op.makes_sounds() {
+                if let Some(snd) = &mut s.pads[pad].sound {
+                    edit::apply(snd, op, range);
+                }
+                return format!("{} done", op.label());
+            }
+            if to + ranges.len() > PADS {
+                return "Not enough pads after To pad".to_owned();
+            }
+            // MPC names stay within 16 characters.
+            let base: String = snd.name.chars().take(13).collect();
+            for (i, r) in ranges.iter().enumerate() {
+                let name = format!("{base}-{}", i + 1);
+                let target = &mut s.pads[to + i];
+                *target = program::Pad { sound: Some(edit::section(&snd, r.clone(), name)), ..program::Pad::default() };
+            }
+            let last = program::pad_name(to + ranges.len() - 1);
+            if ranges.len() > 1 {
+                format!("{} sounds on {}-{last}", ranges.len(), program::pad_name(to))
+            } else {
+                format!("New sound on {last}")
+            }
+        });
+        self.set_screen(from.screen());
+        self.say(msg);
     }
 
     fn parent_dir(&mut self) {
@@ -912,12 +1020,39 @@ impl App {
                 self.song_step = sel.min(left.saturating_sub(1));
             }
             (Screen::Mixer, 5) => self.with(|s| (s.pads[pad].level, s.pads[pad].pan) = (100, 0)),
-            (Screen::Trim, 0) => self.with(|s| s.hits.push(Hit::Press { pad: pad as u8, velocity: 127, var: None })),
-            (Screen::Trim, 5) => self.with(|s| {
+            (Screen::Trim | Screen::Loop | Screen::Zone, 0) => self.set_screen(Screen::Trim),
+            (Screen::Trim | Screen::Loop | Screen::Zone, 1) => self.set_screen(Screen::Loop),
+            (Screen::Trim | Screen::Loop | Screen::Zone, 2) => self.set_screen(Screen::Zone),
+            (Screen::Trim, 3) => self.with(|s| {
                 if let Some(snd) = &mut s.pads[pad].sound {
                     (snd.start, snd.end) = (0, snd.frames.len());
                 }
             }),
+            (Screen::Loop, 3) => self.with(|s| {
+                if let Some(snd) = &mut s.pads[pad].sound {
+                    (snd.loop_to, snd.looping) = (snd.start, false);
+                }
+            }),
+            (Screen::Zone, 3) => {
+                let len = self.zones.last().copied().unwrap_or(0);
+                self.zones = edit::zones(len, self.zones.len() - 1);
+            }
+            (Screen::Trim | Screen::Loop | Screen::Zone, 4) => {
+                let from = Section::of(&self.screen);
+                if from != Section::Zone && self.edit_op == edit::Op::Slice {
+                    self.edit_op = edit::Op::Discard;
+                }
+                self.set_screen(Screen::Edit(from));
+            }
+            (Screen::Trim | Screen::Loop | Screen::Zone, 5) => {
+                let range = self.section(Section::of(&self.screen));
+                self.with(|s| s.hits.push(Hit::Audition { pad: pad as u8, range }));
+            }
+            (Screen::Edit(from), 3) => self.set_screen(from.screen()),
+            (Screen::Edit(from), 4) => {
+                let from = *from;
+                self.do_edit(from);
+            }
             _ => {}
         }
     }
@@ -1191,6 +1326,7 @@ impl eframe::App for App {
             self.message.clear();
         }
         self.keyboard(ui);
+        self.sync_zones();
         self.guard_close(ui);
         // Picks up MIDI controllers plugged in while running.
         if self.midi_scanned.elapsed() > Duration::from_secs(2) {
@@ -1309,7 +1445,19 @@ impl App {
 
         match self.screen {
             Screen::Mixer => self.mixer(&st, painter, p),
-            Screen::Trim => trim(&st, self.pad, painter, p),
+            Screen::Trim | Screen::Loop | Screen::Zone => {
+                let range = match &self.screen {
+                    Screen::Zone => self.zones[self.zone]..self.zones[self.zone + 1],
+                    _ => st.pads[self.pad].sound.as_ref().map_or(0..0, |snd| match self.screen {
+                        Screen::Loop => snd.loop_to..snd.end,
+                        _ => snd.start..snd.end,
+                    }),
+                };
+                // ZONE marks every zone; the others their two points.
+                let marks =
+                    if matches!(self.screen, Screen::Zone) { self.zones.clone() } else { vec![range.start, range.end] };
+                wave(&st, self.pad, painter, p, range, &marks);
+            }
             Screen::Sample => self.meters(painter, p),
             _ => {}
         }
@@ -1678,8 +1826,13 @@ impl App {
     }
 }
 
-/// TRIM screen waveform with the start and end markers.
-fn trim(st: &Shared, pad: usize, painter: &egui::Painter, p: &Panel) {
+/// How far one DATA wheel step moves a point in a sound: 1/500 of it, or a single frame with Shift.
+fn frame_step(len: usize, fine: bool) -> i64 {
+    if fine { 1 } else { (len / 500).max(1) as i64 }
+}
+
+/// TRIM, LOOP and ZONE waveform: `range` drawn dark, the rest faded, a line at each mark.
+fn wave(st: &Shared, pad: usize, painter: &egui::Painter, p: &Panel, range: std::ops::Range<usize>, marks: &[usize]) {
     let Some(snd) = &st.pads[pad].sound else { return };
     let s = p.scale;
     let (top, height) = (80.0, 48.0);
@@ -1693,14 +1846,14 @@ fn trim(st: &Shared, pad: usize, painter: &egui::Painter, p: &Panel) {
             .iter()
             .map(|f| (f[0] + f[1]) / 2.0)
             .fold((0.0f32, 0.0f32), |(lo, hi), x| (lo.min(x), hi.max(x)));
-        let inside = a >= snd.start && a < snd.end;
+        let inside = range.contains(&a);
         let color = if inside { LCD_INK } else { LCD_INK.gamma_multiply(0.35) };
         let x = p.pos(LCD_X + 3.0 + c as f32, 0.0).x;
         let (y0, y1) =
             (p.pos(0.0, mid - hi.min(1.0) * height / 2.0).y, p.pos(0.0, mid - lo.max(-1.0) * height / 2.0).y);
         painter.vline(x, y0..=y1.max(y0 + 0.5 * s), Stroke::new(s, color));
     }
-    for marker in [snd.start, snd.end] {
+    for &marker in marks {
         let x = p.pos(LCD_X + 3.0 + marker as f32 / len as f32 * cols as f32, 0.0).x;
         painter.vline(x, p.pos(0.0, top).y..=p.pos(0.0, top + height).y, Stroke::new(s, LCD_INK));
     }

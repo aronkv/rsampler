@@ -54,7 +54,7 @@ installing.
 
 [Pads](#pads) · [NOTE VARIATION](#note-variation) · [Recording](#recording-a-sequence) ·
 [SONG](#song) · [STEP EDIT](#step-edit) · [PROGRAM](#program-how-each-pad-plays) · [MIXER](#mixer) ·
-[TRIM](#trim) · [Loading samples](#loading-samples) · [SAMPLE](#sample-recording-from-the-input) ·
+[TRIM](#trim-loop-and-zone-editing-a-sound) · [Loading samples](#loading-samples) · [SAMPLE](#sample-recording-from-the-input) ·
 [Projects](#saving-and-loading-projects) · [MIDI](#midi) · [Shortcuts](#keyboard-shortcuts)
 
 rsampler works like the MPC2000XL: the LCD shows one screen at a time, the **CURSOR** keys move
@@ -63,7 +63,7 @@ between its fields, and the **DATA** wheel changes the highlighted field. The si
 
 - **Cursor**: arrow keys or the **CURSOR** buttons. You can also click a field on the LCD.
 - **DATA wheel**: drag or scroll over the wheel, scroll over the LCD, or press `+` / `-`. Hold
-  **Shift** for fine steps (0.1 BPM tempo, 0.1 semitone tuning, single-frame trimming).
+  **Shift** for fine steps (0.1 BPM tempo, 0.1 semitone tuning, single frames in a sound).
 
 ### Pads
 
@@ -192,10 +192,43 @@ The blue **8 / MIXER** key shows the 16 pads of the current bank as level faders
 **←** / **→** choose the pad, **↑** selects `Level` and **↓** selects `Pan`, and the DATA wheel sets
 the value. **RESET** (F6) returns the pad to full level, centre.
 
-### TRIM
+### TRIM, LOOP and ZONE: editing a sound
 
-The blue **5 / TRIM** key shows the selected pad's waveform. `St` and `End` set the part that plays.
-**PLAY** (F1) auditions it, **RESET** (F6) restores the whole sound.
+The blue **5 / TRIM** key (`Ctrl+5`) shows the selected pad's waveform. **TRIM** (F1), **LOOP** (F2)
+and **ZONE** (F3) switch between the three views, as on the MPC. On all three, **PLAY X** (F6)
+plays the highlighted part once, as it is, and **EDIT** (F5) opens the EDIT window on it.
+
+**TRIM**: `St` and `End` set the part of the sound that plays. **RESET** (F4) restores the whole
+sound.
+
+**LOOP**: with `Loop` ON the sound jumps back from `End` to `To` for as long as the pad is held
+(or, in a sequence, for the length of the note), then fades out over its decay. `Lngth` moves `To`
+so the loop gets longer or shorter. A looping sound always plays as NOTE OFF, as on the MPC.
+**RESET** (F4) turns the loop off.
+
+**ZONE** chops the sound: `Zones` splits it into 1–16 equal zones, back to back. `Zone` picks one,
+and its `St` and `End` move the boundaries it shares with its neighbours, so no part is lost or
+played twice. **RESET** (F4) splits it evenly again.
+
+Every point moves by 1/500 of the sound per DATA wheel step, or by single frames with Shift.
+
+**EDIT** works on St–End from TRIM, on the loop from LOOP, and on the selected zone from ZONE:
+
+| Edit                  | What it does                                                   |
+| --------------------- | -------------------------------------------------------------- |
+| DISCARD               | Keeps only the section and throws away the rest                |
+| LOOP FROM ST TO END   | Sets `To` to `St` and turns `Loop` on                           |
+| SECTION -> NEW SOUND  | Copies the section to `To pad`                                 |
+| DELETE SECTION        | Cuts the section out                                           |
+| SILENCE SECTION       | Makes the section silent                                       |
+| REVERSE SECTION       | Plays the section backwards                                    |
+| NORMALIZE SECTION     | Raises the section until its loudest point is at full level    |
+| SLICE SOUND (ZONE)    | Puts every zone on its own pad, from `To pad` on               |
+
+**DO IT** (F5) applies it, **CANCEL** (F4) goes back. New sounds are named after the original
+(`KICK-1`, `KICK-2`, …) and their pads start from the default settings. To chop a break onto 16
+pads: load it on a pad, go to ZONE, set `Zones` to 16, fix the boundaries by ear with PLAY X, then
+EDIT, SLICE SOUND, `To pad` B01, DO IT. Edits cannot be undone, as on the MPC.
 
 ### Loading samples
 
@@ -206,7 +239,7 @@ The blue **5 / TRIM** key shows the selected pad's waveform. `St` and `End` set 
 5. **Backspace**, **←** or **F1** goes up a folder.
 
 WAV files of any bit depth and sample rate work, mono or stereo. The MPC2000XL's own `.SND`
-sounds load too, with their trim points and tuning, so old MPC sound libraries can be used
+sounds load too, with their trim points, loop and tuning, so old MPC sound libraries can be used
 directly.
 
 An MPC2000XL program (`.PGM`) loads onto all 64 pads at once (press `Enter` twice): each pad gets
@@ -309,6 +342,7 @@ shows the version and the output sample rate.
 - MIDI output on Windows
 - Windows-specific testing
 - The MISC mode
+- TIME STRETCH and INSERT SOUND in the EDIT window
 - Loading the MPC's `.SEQ`, `.APS` and `.ALL` files; its `.SND` sounds, `.PGM` programs and
   `.MID` sequences already load
 - Windows builds
