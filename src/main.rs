@@ -5,6 +5,7 @@ mod audio;
 mod lcd;
 mod midi;
 mod panel;
+mod pgm;
 mod program;
 mod project;
 mod sample;
@@ -586,6 +587,9 @@ impl App {
             *b = Browser::open(path, !saving);
             return;
         }
+        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pgm")) {
+            return self.load_program(path);
+        }
         let pad = self.pad;
         let rate = self.with(|s| s.rate);
         let is_snd = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("snd"));
@@ -609,6 +613,28 @@ impl App {
                     s.hits.push(Hit::Press { pad: pad as u8, velocity: KEY_VELOCITY, var: None });
                 });
                 self.say("Loaded");
+            }
+            Err(e) => self.say(e),
+        }
+    }
+
+    /// An MPC program replaces all 64 pads, so it takes a second ENTER to confirm.
+    fn load_program(&mut self, path: PathBuf) {
+        if self.confirm.as_ref() != Some(&path) {
+            self.say("Replaces all pads. ENTER again to load");
+            self.confirm = Some(path);
+            return;
+        }
+        self.confirm = None;
+        let rate = self.with(|s| s.rate);
+        match pgm::load(&path, rate) {
+            Ok((name, pads, missing)) => {
+                self.with(|s| s.pads = pads);
+                if missing.is_empty() {
+                    self.say(format!("Loaded program {name}"));
+                } else {
+                    self.say(format!("{name}: missing {}", missing.join(" ")));
+                }
             }
             Err(e) => self.say(e),
         }

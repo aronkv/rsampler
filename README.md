@@ -208,6 +208,11 @@ WAV files of any bit depth and sample rate work, mono or stereo. The MPC2000XL's
 sounds load too, with their trim points and tuning, so old MPC sound libraries can be used
 directly.
 
+An MPC2000XL program (`.PGM`) loads onto all 64 pads at once (press `Enter` twice): each pad gets
+its sound from the `.SND` files next to the program, with the program's tuning, envelope, filter,
+overlap, mute assign, level and pan. Sounds that are not there are listed on the LCD. The MPC's
+SIMULT and velocity-switch modes and its velocity modulation are not carried over yet.
+
 ### SAMPLE: recording from the input
 
 The blue **4 / SAMPLE** key (`Ctrl+4`) opens the default audio input; it is closed again when you
@@ -294,8 +299,8 @@ shows the version and the output sample rate.
 - MIDI output on Windows
 - Windows-specific testing
 - The MISC mode
-- Loading the MPC's program, sequence and ALL files (`.PGM`, `.SEQ`, `.APS`, `.ALL`); its `.SND`
-  sounds already load
+- Loading the MPC's sequence and ALL files (`.SEQ`, `.APS`, `.ALL`); `.SND` sounds and `.PGM`
+  programs already load
 - Windows builds
 
 ## Reference
