@@ -39,11 +39,14 @@ struct SetupFile {
     key_velocity: u8,
     #[serde(default)]
     sync: bool,
+    /// The MIDI out port by name; older projects leave the current one.
+    #[serde(default)]
+    midi_out: Option<String>,
 }
 
 impl Default for SetupFile {
     fn default() -> Self {
-        Self { clock_out: false, key_velocity: 101, sync: false }
+        Self { clock_out: false, key_velocity: 101, sync: false, midi_out: None }
     }
 }
 
@@ -201,7 +204,12 @@ fn describe(s: &Shared) -> ProjectFile {
             steps: s.song.steps.iter().map(|&(seq, reps)| [seq as u32, reps]).collect(),
             looping: s.song.looping,
         },
-        setup: SetupFile { clock_out: s.t.clock_out, key_velocity: s.key_velocity, sync: s.t.sync },
+        setup: SetupFile {
+            clock_out: s.t.clock_out,
+            key_velocity: s.key_velocity,
+            sync: s.t.sync,
+            midi_out: Some(s.out_port.clone()),
+        },
     }
 }
 
@@ -408,6 +416,9 @@ impl Loaded {
         s.t.clock_out = file.setup.clock_out;
         s.t.sync = file.setup.sync;
         s.key_velocity = file.setup.key_velocity.clamp(1, 127);
+        if let Some(port) = file.setup.midi_out {
+            s.out_port = port;
+        }
         s.t.seq = 0;
         s.t.track = 0;
         s.t.solo = None;

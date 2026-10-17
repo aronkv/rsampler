@@ -1,11 +1,13 @@
 //! MIDI input: notes 36–99 (C1–D#6) play pads A01–D16 with their velocity. rsampler connects to
 //! every MIDI input it finds and, on Linux, also offers its own "rsampler" input port.
 //!
-//! MIDI output goes to an "rsampler" output port on Linux, for synths and DAWs to connect to.
+//! MIDI output goes to the port chosen in SETUP: on Linux by default rsampler's own "rsampler"
+//! port, for synths and DAWs to connect to; or straight to a synth, interface or, on Windows, the
+//! system's own synth.
 
 use std::sync::{Arc, Mutex, mpsc};
 
-use midir::{Ignore, MidiInput, MidiInputConnection};
+use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
 
 use crate::audio::{Hit, Shared, lock};
 
@@ -71,25 +73,83 @@ impl Midi {
     }
 }
 
-/// Opens the output port and returns where to send messages; `None` on Windows, which has no
-/// virtual MIDI ports.
-pub fn start_out() -> Option<mpsc::Sender<[u8; 3]>> {
-    #[cfg(unix)]
-    {
-        use midir::os::unix::VirtualOutput;
-        let mut conn = midir::MidiOutput::new("rsampler").ok()?.create_virtual("rsampler").ok()?;
+/// MIDI out port choices besides the system's ports.
+pub const OUT_OFF: &str = "OFF";
+/// rsampler's own port, which other programs connect to (not on Windows).
+pub const OUT_VIRTUAL: &str = "rsampler (own port)";
+
+/// Where MIDI output goes. A thread sends the messages, so the audio thread never waits on the
+/// MIDI system.
+pub struct MidiOut {
+    conn: Arc<Mutex<Option<MidiOutputConnection>>>,
+    pub port: String,
+}
+
+impl MidiOut {
+    /// Starts on rsampler's own port where there is one, else off; returns where to send.
+    pub fn start() -> (Self, mpsc::Sender<[u8; 3]>) {
+        let conn: Arc<Mutex<Option<MidiOutputConnection>>> = Arc::default();
         let (tx, rx) = mpsc::channel::<[u8; 3]>();
-        // The audio thread must not wait on the MIDI system, so a thread does the sending.
+        let sender = conn.clone();
         std::thread::spawn(move || {
             for msg in rx {
                 let len = if msg[0] >= 0xF8 { 1 } else { 3 };
-                let _ = conn.send(&msg[..len]);
+                if let Some(c) = sender.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+                    let _ = c.send(&msg[..len]);
+                }
             }
         });
-        Some(tx)
+        let mut out = Self { conn, port: OUT_OFF.to_owned() };
+        if cfg!(unix) {
+            let _ = out.select(OUT_VIRTUAL);
+        }
+        (out, tx)
     }
-    #[cfg(not(unix))]
-    None
+
+    /// The ports to choose from: OFF, our own port where there is one, then the system's.
+    pub fn choices() -> Vec<String> {
+        let mut list = vec![OUT_OFF.to_owned()];
+        if cfg!(unix) {
+            list.push(OUT_VIRTUAL.to_owned());
+        }
+        if let Ok(probe) = MidiOutput::new("rsampler") {
+            list.extend(
+                probe
+                    .ports()
+                    .iter()
+                    .filter_map(|p| probe.port_name(p).ok())
+                    .filter(|n| !n.contains("rsampler") && !n.contains("Midi Through")),
+            );
+        }
+        list
+    }
+
+    pub fn select(&mut self, name: &str) -> Result<(), String> {
+        let mut slot = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        // The old connection goes first, so a port can be reopened.
+        *slot = None;
+        self.port = OUT_OFF.to_owned();
+        let out = MidiOutput::new("rsampler").map_err(|e| e.to_string())?;
+        let conn = match name {
+            OUT_OFF => return Ok(()),
+            #[cfg(unix)]
+            OUT_VIRTUAL => {
+                use midir::os::unix::VirtualOutput;
+                out.create_virtual("rsampler").map_err(|e| e.to_string())?
+            }
+            _ => {
+                let port = out
+                    .ports()
+                    .into_iter()
+                    .find(|p| out.port_name(p).is_ok_and(|n| n == name))
+                    .ok_or("The port is gone")?;
+                out.connect(&port, "rsampler").map_err(|e| e.to_string())?
+            }
+        };
+        *slot = Some(conn);
+        self.port = name.to_owned();
+        Ok(())
+    }
 }
 
 fn input() -> Option<MidiInput> {

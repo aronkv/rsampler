@@ -209,6 +209,7 @@ pub enum Field {
     VeloAttack,
     VeloStart,
     VeloFilter,
+    OutPort,
 }
 
 /// The settings of the sequence EDIT screens, kept between visits like on the MPC.
@@ -298,6 +299,8 @@ pub struct View<'a> {
     pub seq_edit: &'a SeqEdit,
     /// Selected PAD BANK, 0..4.
     pub bank: usize,
+    /// The MIDI out port.
+    pub out_port: &'a str,
     /// 16 LEVELS: the pad, NOTE VAR's parameter (None = VELOCITY), and the original-key pad.
     pub levels: (usize, Option<crate::program::VarParam>, usize),
 }
@@ -462,10 +465,7 @@ pub fn rows(v: &View) -> Vec<Row> {
                     })],
                 ),
                 row(vec![t("Keyboard pad velocity:"), f(Field::KeyVelocity, s.key_velocity.to_string())], vec![]),
-                row(
-                    vec![t(if s.midi_out.is_some() { "MIDI out port: rsampler" } else { "MIDI out: not available" })],
-                    vec![],
-                ),
+                row(vec![t("MIDI out:"), f(Field::OutPort, v.out_port.chars().take(34).collect::<String>())], vec![]),
             ];
             msg(&mut rows);
             rows

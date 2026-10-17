@@ -120,6 +120,8 @@ pub struct Shared {
     pub key_velocity: u8,
     /// A sound file to listen to from the LOAD screen, consumed by the audio callback.
     pub preview: Option<Sound>,
+    /// The MIDI out port chosen in SETUP, saved with the project; the UI opens it.
+    pub out_port: String,
 }
 
 impl Shared {
@@ -160,6 +162,7 @@ impl Shared {
             midi_out: None,
             key_velocity: 101,
             preview: None,
+            out_port: crate::midi::OUT_OFF.to_owned(),
         }
     }
 

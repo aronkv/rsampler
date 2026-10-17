@@ -357,9 +357,12 @@ runs, and on Linux it also offers its own `rsampler` input port for other progra
 (C1–D#6) play pads A01–D16 with their velocity, whatever bank is selected, and are recorded like
 pad hits. Most 16-pad controllers send 36–51 by default, which lands on bank A.
 
-**Out (Linux):** connect a synth or DAW to the `rsampler` output port. A track whose `Out` field is
-set to a channel sends its notes there as it plays (pad A01 = note 36 again), and pads you hit pass
-through on the selected track's channel, so the pads can play an external synth.
+**Out:** `MIDI out` in SETUP chooses where MIDI goes: on Linux by default rsampler's own
+`rsampler` port, for a synth or DAW to connect to, or straight to any MIDI port the system has (a
+USB interface, a synth, or on Windows the built-in Microsoft GS Wavetable Synth); OFF sends
+nothing. The choice is saved with the project. A track whose `Out` field is set to a channel sends
+its notes there as it plays (pad A01 = note 36 again), and pads you hit pass through on the
+selected track's channel, so the pads can play an external synth.
 
 **Clock out:** with `MIDI clock out` on in SETUP, rsampler sends MIDI clock while playing, and
 start, stop, or song position and continue, so a DAW or drum machine can follow its tempo.
@@ -371,9 +374,9 @@ while syncing; STOP still works.
 
 ### SETUP and OTHER
 
-The blue **7 / SETUP** key (`Ctrl+7`) holds `MIDI clock out`, `Sync` (INTERNAL or MIDI CLOCK) and
-the velocity of pads hit from the computer keyboard (101 by default); all are saved with the
-project. **9 / OTHER** (`Ctrl+9`)
+The blue **7 / SETUP** key (`Ctrl+7`) holds `MIDI clock out`, `Sync` (INTERNAL or MIDI CLOCK),
+the velocity of pads hit from the computer keyboard (101 by default) and the `MIDI out` port; all
+are saved with the project. **9 / OTHER** (`Ctrl+9`)
 shows the version and the output sample rate.
 
 ### Keyboard shortcuts
@@ -400,7 +403,6 @@ shows the version and the output sample rate.
 
 ### Not there yet
 
-- MIDI output on Windows
 - Windows-specific testing
 - The MISC mode
 - TIME STRETCH and INSERT SOUND in the EDIT window

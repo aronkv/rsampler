@@ -133,6 +133,7 @@ struct App {
     rec_gain: f32,
     samples_taken: u32,
     midi: midi::Midi,
+    midi_out: midi::MidiOut,
     midi_scanned: Instant,
     /// ZONE: bounds of the zones of `zones_pad`'s sound, and the selected zone.
     zones: Vec<usize>,
@@ -190,7 +191,12 @@ impl App {
         let music = home.join("Music");
         let saved = project::fingerprint(&audio::lock(&engine.shared));
         let midi = midi::Midi::start(engine.shared.clone());
-        audio::lock(&engine.shared).midi_out = midi::start_out();
+        let (midi_out, out_tx) = midi::MidiOut::start();
+        {
+            let mut s = audio::lock(&engine.shared);
+            s.midi_out = Some(out_tx);
+            s.out_port = midi_out.port.clone();
+        }
         Self {
             engine,
             screen: Screen::Main,
@@ -235,6 +241,7 @@ impl App {
             rec_gain: 0.5,
             samples_taken: 0,
             midi,
+            midi_out,
             // Scan for MIDI inputs on the first frame.
             midi_scanned: Instant::now() - Duration::from_secs(60),
             // The MPC starts with 16 zones.
@@ -406,6 +413,7 @@ impl App {
             seq_edit: &self.seq_edit,
             levels: (self.levels_pad, self.levels_var, self.levels_key),
             bank: self.bank,
+            out_port: &self.midi_out.port,
             sample: self.input.as_ref().map(|input| {
                 let c = input.lock();
                 lcd::SampleView {
@@ -526,6 +534,12 @@ impl App {
                     .collect();
                 let i = ops.iter().position(|o| *o == self.edit_op).unwrap_or(0) as i32;
                 return self.edit_op = ops[(i + d).clamp(0, ops.len() as i32 - 1) as usize];
+            }
+            Field::OutPort => {
+                let choices = midi::MidiOut::choices();
+                let i = choices.iter().position(|c| *c == self.midi_out.port).unwrap_or(0) as i32;
+                let next = choices[(i + d).rem_euclid(choices.len() as i32) as usize].clone();
+                return self.open_out_port(&next);
             }
             Field::LevelsPad => {
                 return self.levels_pad = (self.levels_pad as i32 + d).clamp(0, PADS as i32 - 1) as usize;
@@ -731,7 +745,8 @@ impl App {
                 | Field::LevelsPad
                 | Field::LevelsParam
                 | Field::LevelsType
-                | Field::LevelsKey => {}
+                | Field::LevelsKey
+                | Field::OutPort => {}
             }
         });
     }
@@ -1092,6 +1107,10 @@ impl App {
                     project::fingerprint(s)
                 });
                 self.save_name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                let port = self.with(|s| s.out_port.clone());
+                if port != self.midi_out.port {
+                    self.open_out_port(&port);
+                }
                 self.project = Some(path);
                 self.title_changed = true;
                 (self.pad, self.bank, self.focus) = (0, 0, 0);
@@ -1420,6 +1439,15 @@ impl App {
             "" => {}
             other => self.say(format!("{other} is not available yet")),
         }
+    }
+
+    /// Opens a MIDI out port, telling when it cannot; the shared copy follows for saving.
+    fn open_out_port(&mut self, name: &str) {
+        if let Err(e) = self.midi_out.select(name) {
+            self.say(format!("MIDI out {name}: {e}"));
+        }
+        let port = self.midi_out.port.clone();
+        self.with(|s| s.out_port = port);
     }
 
     /// NEXT SEQ and TRACK MUTE open their screen, or go back to MAIN when it is already open.
