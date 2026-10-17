@@ -891,6 +891,65 @@ fn voice(p: &Pad, sound: &Sound, pad: u8, velocity: u8, rate: u32) -> Voice {
     }
 }
 
+/// A copy of what [`render`] needs, taken quickly so the audio lock is not held while rendering.
+pub fn bounce(live: &Shared, song: bool) -> Shared {
+    let mut s = Shared::new(live.rate);
+    s.pads = live.pads.clone();
+    s.seqs = live.seqs.clone();
+    s.master = live.master;
+    (s.t.seq, s.t.solo) = (live.t.seq, live.t.solo);
+    s.song = Song { steps: live.song.steps.clone(), looping: false };
+    if song {
+        s.play_song(0);
+    } else {
+        let seq = s.t.seq;
+        s.seqs[seq].looping = false;
+        s.play(true);
+    }
+    s
+}
+
+/// Plays a [`bounce`] copy without the sound card and returns the mixed output: what PLAY START
+/// would sound like (the sequence once, or the song), plus the sounds ringing out afterwards.
+pub fn render(mut s: Shared) -> Vec<[f32; 2]> {
+    let rate = s.rate;
+    let mut v = Voices::new(rate);
+    let mut out = Vec::new();
+    let mix = |s: &mut Shared, v: &mut Voices, out: &mut Vec<[f32; 2]>| {
+        s.advance(v);
+        let [l, r] = v.render();
+        out.push([soft_clip(l * s.master), soft_clip(r * s.master)]);
+    };
+    // ponytail: renders everything into memory; an hour at 48 kHz is about 1.4 GB, so it stops
+    // there. Stream to the file if longer bounces are ever needed.
+    let limit = rate as usize * 3600;
+    while s.t.playing && out.len() < limit {
+        mix(&mut s, &mut v, &mut out);
+    }
+    // Held notes end with the sequence; the rest ring out, for at most ten seconds.
+    for (pad, _) in std::mem::take(&mut s.t.note_offs) {
+        v.release(pad);
+    }
+    for _ in 0..rate as usize * 10 {
+        if v.voices.is_empty() {
+            break;
+        }
+        mix(&mut s, &mut v, &mut out);
+    }
+    out
+}
+
+/// Writes stereo frames as a 24-bit WAV file.
+pub fn write_wav(path: &Path, frames: &[[f32; 2]], rate: u32) -> Result<(), hound::Error> {
+    let spec =
+        hound::WavSpec { channels: 2, sample_rate: rate, bits_per_sample: 24, sample_format: hound::SampleFormat::Int };
+    let mut w = hound::WavWriter::create(path, spec)?;
+    for x in frames.iter().flatten() {
+        w.write_sample((x.clamp(-1.0, 1.0) * 8_388_607.0) as i32)?;
+    }
+    w.finalize()
+}
+
 /// Loads a WAV file as stereo frames resampled to `rate`.
 pub fn load_wav(path: &Path, rate: u32) -> Result<Frames, hound::Error> {
     let mut reader = hound::WavReader::open(path)?;
@@ -1297,6 +1356,22 @@ mod tests {
         s.hits.push(Hit::Audition { pad: 0, range: 0..100 });
         run(&mut s, &mut v, 101);
         assert!(v.voices.is_empty());
+    }
+
+    #[test]
+    fn bounce_plays_the_sequence_once_then_rings_out() {
+        let (mut s, _) = with_kit(48_000);
+        // One kick on the first beat of a 1-bar sequence at 120 BPM: two seconds.
+        s.seqs[0].set_bars(1);
+        s.seqs[0].tracks[0].insert(Note { tick: 0, pad: 0, velocity: 127, duration: 10, var: None });
+        let out = render(bounce(&s, false));
+        assert!(out.len() >= 96_000 && out.len() < 96_000 + 48_000);
+        assert!(out[..4800].iter().any(|f| f[0].abs() > 0.1));
+        assert!(out[48_000..].iter().all(|f| f[0].abs() < 1e-3));
+        // The live sequence still loops; only the copy was played.
+        assert!(s.seqs[0].looping);
+        // An empty song gives nothing.
+        assert!(render(bounce(&s, true)).is_empty());
     }
 
     #[test]

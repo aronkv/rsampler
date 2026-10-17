@@ -313,6 +313,11 @@ To save, press `Ctrl+S`, **SHIFT + ENTER** or **SAVE** (F2) on the LOAD screen:
    takes its name.
 3. Press **DO IT** (F6). Replacing an existing project asks for a second **DO IT**.
 
+**Exporting audio:** on the same SAVE screen, **WAV** (F3) writes the current sequence, played
+once from the start, as `<name>.wav`, and **SONG** (F2) the whole song as `<name>-song.wav`: 24-bit
+stereo at the output sample rate, with muted tracks left out, SOLO respected, and the last sounds
+left to ring out. It renders faster than real time, so nothing has to play.
+
 Once a project has been saved or loaded, `Ctrl+S` saves over it straight away.
 
 To load, choose the project (marked `PROJECT`) on the LOAD screen and press `Enter` twice; loading

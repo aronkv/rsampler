@@ -144,6 +144,12 @@ struct App {
     seq_edit: lcd::SeqEdit,
 }
 
+enum Export {
+    Midi,
+    Wav,
+    SongWav,
+}
+
 /// Something the keyboard asked for this frame.
 enum Action {
     Pad(usize, bool),
@@ -953,29 +959,50 @@ impl App {
     }
 
     /// MIDI (F4) on the SAVE screen: writes the current sequence as `<name>.mid` for a DAW.
-    fn export_midi(&mut self) {
+    /// SAVE screen F2–F4: the song or the current sequence as a WAV file, or the sequence as a
+    /// MIDI file, named after the project name in the browsed folder.
+    fn export(&mut self, what: Export) {
         let Screen::Save(b) = &self.screen else { return };
         let name = self.save_name.trim();
         if name.is_empty() {
             return self.say("Type a name first (NAME)");
         }
-        let path = b.dir.join(format!("{name}.mid"));
+        let (file, key) = match what {
+            Export::Midi => (format!("{name}.mid"), "MIDI"),
+            Export::Wav => (format!("{name}.wav"), "WAV"),
+            Export::SongWav => (format!("{name}-song.wav"), "SONG"),
+        };
+        let (dir, path) = (b.dir.clone(), b.dir.join(&file));
         if path.exists() && self.confirm.as_ref() != Some(&path) {
-            self.say("Exists. MIDI again to replace");
+            self.say(format!("Exists. {key} again to replace"));
             self.confirm = Some(path);
             return;
         }
         self.confirm = None;
-        let bytes = self.with(|s| midifile::from_sequence(s.seq()));
-        match std::fs::write(&path, bytes) {
+        let result = match what {
+            Export::Midi => {
+                std::fs::write(&path, self.with(|s| midifile::from_sequence(s.seq()))).map_err(|e| e.to_string())
+            }
+            Export::Wav | Export::SongWav => {
+                let song = matches!(what, Export::SongWav);
+                if song && self.with(|s| s.song.steps.is_empty()) {
+                    return self.say("The song is empty");
+                }
+                let (copy, rate) = self.with(|s| (audio::bounce(s, song), s.rate));
+                // ponytail: renders on the UI thread, a moment for a few minutes of music; move
+                // to a thread with a progress display if long songs make the window hang.
+                let frames = audio::render(copy);
+                audio::write_wav(&path, &frames, rate).map_err(|e| e.to_string())
+            }
+        };
+        match result {
             Ok(()) => {
-                let dir = b.dir.clone();
                 if let Screen::Save(b) = &mut self.screen {
                     *b = Browser::open(dir, false);
                 }
-                self.say(format!("Wrote {name}.mid"));
+                self.say(format!("Wrote {file}"));
             }
-            Err(e) => self.say(e.to_string()),
+            Err(e) => self.say(e),
         }
     }
 
@@ -1163,7 +1190,9 @@ impl App {
             (Screen::Load(_) | Screen::Save(_), 0) => self.parent_dir(),
             (Screen::Load(_), 1) => self.open_save(),
             (Screen::Load(_), 5) => self.enter(),
-            (Screen::Save(_), 3) => self.export_midi(),
+            (Screen::Save(_), 1) => self.export(Export::SongWav),
+            (Screen::Save(_), 2) => self.export(Export::Wav),
+            (Screen::Save(_), 3) => self.export(Export::Midi),
             (Screen::Save(_), 4) => (self.editing_name, self.replace_name) = (true, true),
             (Screen::Save(_), 5) => self.save_here(),
             (Screen::Program, 0) => self.mode("LOAD"),

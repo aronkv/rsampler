@@ -96,7 +96,7 @@ impl Screen {
             Screen::Events | Screen::Bars => ["EVENTS", "BARS", "", "", "", "DO IT"],
             Screen::Step => ["DELETE", "", "", "", "TR -", "TR +"],
             Screen::Load(_) => ["UP DIR", "SAVE", "", "", "", "DO IT"],
-            Screen::Save(_) => ["UP DIR", "", "", "MIDI", "NAME", "DO IT"],
+            Screen::Save(_) => ["UP DIR", "SONG", "WAV", "MIDI", "NAME", "DO IT"],
             Screen::Program => ["LOAD", "TRIM", "MIXER", "", "", "CLEAR"],
             Screen::Mixer => ["", "", "", "", "", "RESET"],
             Screen::Trim | Screen::Loop | Screen::Zone => ["TRIM", "LOOP", "ZONE", "RESET", "EDIT", "PLAY X"],
