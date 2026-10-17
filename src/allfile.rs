@@ -37,6 +37,8 @@ pub struct AllSeq {
     pub signature: (u32, u32),
     pub looping: bool,
     pub on: [bool; 64],
+    /// Per track: 0 MIDI, 1–4 DRUM1–4.
+    pub buses: [u8; 64],
     pub notes: Vec<AllNote>,
 }
 
@@ -112,6 +114,7 @@ pub fn parse(b: &[u8]) -> Result<All, String> {
             192 | 96 | 48 | 24 if first_bar > 0 => ((first_bar / tpb).clamp(1, 32), 384 / tpb),
             _ => (4, 4),
         };
+        let buses: [u8; 64] = std::array::from_fn(|t| s[384 + 1088 + t].min(4));
         let mut on = [true; 64];
         for (t, on) in on.iter_mut().enumerate() {
             *on = s[TRACK_STATUS_AT + t] >> 1 & 1 == 1;
@@ -127,6 +130,7 @@ pub fn parse(b: &[u8]) -> Result<All, String> {
             signature,
             looping: s[52] > 0,
             on,
+            buses,
             notes,
         });
         // An even number of segments is followed by two terminators, an odd one by one.
@@ -136,9 +140,9 @@ pub fn parse(b: &[u8]) -> Result<All, String> {
 }
 
 impl AllSeq {
-    /// The sequence with each MPC drum note on the pad `pad_of` gives; notes without a pad are
-    /// dropped and counted.
-    pub fn to_sequence(&self, pad_of: impl Fn(u8) -> Option<u8>) -> (Sequence, usize) {
+    /// The sequence with each MPC drum note on the pad `pad_of(track, note)` gives; notes
+    /// without a pad are dropped and counted.
+    pub fn to_sequence(&self, pad_of: impl Fn(usize, u8) -> Option<u8>) -> (Sequence, usize) {
         let mut seq = Sequence { tempo: self.tempo.clamp(30.0, 300.0), looping: self.looping, ..Sequence::default() };
         // Names the MPC gives by default stay empty, so they follow the sequence's number.
         if self.name != format!("Sequence{:02}", self.index + 1) {
@@ -151,12 +155,12 @@ impl AllSeq {
         }
         seq.set_signature(self.signature.0, self.signature.1);
         seq.set_bars(self.bars);
-        for (t, on) in seq.tracks.iter_mut().zip(self.on) {
-            t.on = on;
+        for ((t, on), bus) in seq.tracks.iter_mut().zip(self.on).zip(self.buses) {
+            (t.on, t.bus) = (on, bus);
         }
         let (len, mut dropped) = (seq.len(), 0);
         for n in &self.notes {
-            let Some(pad) = pad_of(n.note).filter(|_| n.tick < len) else {
+            let Some(pad) = pad_of(n.track, n.note).filter(|_| n.tick < len) else {
                 dropped += 1;
                 continue;
             };
@@ -199,7 +203,9 @@ mod tests {
         s[BARS_AT + 1..BARS_AT + 3].copy_from_slice(&288u16.to_le_bytes());
         for t in 0..64 {
             s[TRACK_STATUS_AT + t] = if t == 5 { 1 } else { 3 };
+            s[384 + 1088 + t] = 1;
         }
+        s[384 + 1088 + 7] = 0;
         // Note 37 at tick 70000 (needs the third tick byte), held 1000 ticks, velocity 90,
         // ATTACK variation 50.
         let (tick, dur) = (70_000u32, 1000u32);
@@ -231,13 +237,14 @@ mod tests {
         let [seq] = &all.seqs[..] else { panic!("one sequence") };
         assert_eq!((seq.index, seq.tempo, seq.bars, seq.signature, seq.looping), (2, 93.5, 3, (3, 4), true));
         assert!(!seq.on[5] && seq.on[0]);
+        assert_eq!((seq.buses[0], seq.buses[7]), (1, 0));
         let n = &seq.notes[0];
         assert_eq!((n.track, n.tick, n.note, n.velocity, n.duration), (2, 70_000, 37, 90, 1000));
         assert_eq!(n.var, (VarParam::Attack, 50));
         assert_eq!(seq.notes.len(), 2);
 
         // 3 bars of 3/4 end at 864, so the note at 70000 is dropped; note 36 goes to pad 1.
-        let (s, dropped) = seq.to_sequence(|n| n.checked_sub(35));
+        let (s, dropped) = seq.to_sequence(|_, n| n.checked_sub(35));
         assert_eq!(dropped, 1);
         assert_eq!(s.tracks[2].notes[0].pad, 1);
         assert_eq!((s.tempo, s.beats, s.beat_unit, s.bars), (93.5, 3, 4, 3));

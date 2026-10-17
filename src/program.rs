@@ -5,6 +5,23 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 pub const PADS: usize = 64;
+/// The MPC2000XL holds up to 24 programs.
+pub const PROGRAMS: usize = 24;
+/// DRUM1–4: each plays one program; tracks choose a DRUM bus, or MIDI.
+pub const DRUMS: usize = 4;
+
+/// A program: what the 64 pads play.
+#[derive(Clone)]
+pub struct Program {
+    pub name: String,
+    pub pads: Vec<Pad>,
+}
+
+impl Program {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self { name: name.into(), pads: (0..PADS).map(|_| Pad::default()).collect() }
+    }
+}
 
 /// Stereo frames at the output sample rate.
 pub type Frames = Arc<[[f32; 2]]>;

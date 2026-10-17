@@ -7,13 +7,15 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::audio::{Shared, Song, load_wav};
-use crate::program::{FilterEnv, Frames, Generation, Overlap, PADS, Pad, Sound, VarParam, Velo, pad_name};
+use crate::program::{
+    DRUMS, FilterEnv, Frames, Generation, Overlap, PADS, PROGRAMS, Pad, Program, Sound, VarParam, Velo, pad_name,
+};
 use crate::seq::{Note, SEQUENCES, Sequence, TIMING, TRACKS};
 
 pub const FILE: &str = "rsampler.json";
 /// 2: `decay` became a time, as on the MPC; version 1 stored where the END fade began, in percent
-/// of the sound.
-const VERSION: u32 = 2;
+/// of the sound. 3: several programs, in `programs`; earlier versions had one, in `pads`.
+const VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
 struct ProjectFile {
@@ -23,14 +25,27 @@ struct ProjectFile {
     swing: u32,
     count_in: bool,
     click: bool,
-    /// Only pads that differ from the default.
+    /// The one program of versions 1 and 2.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pads: Vec<PadFile>,
+    #[serde(default)]
+    programs: Vec<ProgramFile>,
+    /// The program each DRUM bus plays.
+    #[serde(default)]
+    drums: [usize; DRUMS],
     /// Only sequences that differ from the default.
     sequences: Vec<SeqFile>,
     #[serde(default)]
     song: SongFile,
     #[serde(default)]
     setup: SetupFile,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ProgramFile {
+    name: String,
+    /// Only pads that differ from the default.
+    pads: Vec<PadFile>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -121,11 +136,18 @@ struct TrackFile {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     name: String,
     on: bool,
+    /// 0 MIDI, 1–4 DRUM1–4.
+    #[serde(default = "drum1")]
+    bus: u8,
     #[serde(default)]
     out: Option<u8>,
     /// tick, pad, velocity, duration, and for notes with a NOTE VARIATION its parameter
     /// (0 TUNE, 1 DECAY, 2 ATTACK, 3 FILTER) and value.
     notes: Vec<Vec<u32>>,
+}
+
+fn drum1() -> u8 {
+    1
 }
 
 pub fn is_project(dir: &Path) -> bool {
@@ -134,12 +156,43 @@ pub fn is_project(dir: &Path) -> bool {
 
 /// The project as it is written to `rsampler.json`.
 fn describe(s: &Shared) -> ProjectFile {
+    let programs = s
+        .programs
+        .iter()
+        .enumerate()
+        .map(|(n, p)| ProgramFile { name: p.name.clone(), pads: describe_pads(n, &p.pads) })
+        .collect();
+    let fresh = Sequence::default();
+    let sequences = describe_seqs(s, &fresh);
+    ProjectFile {
+        version: VERSION,
+        master: s.master,
+        timing: s.t.timing,
+        swing: s.t.swing,
+        count_in: s.t.count_in,
+        click: s.t.click,
+        pads: Vec::new(),
+        programs,
+        drums: s.drums,
+        sequences,
+        song: SongFile { steps: s.song.steps.iter().map(|&(q, r)| [q as u32, r]).collect(), looping: s.song.looping },
+        setup: SetupFile {
+            clock_out: s.t.clock_out,
+            key_velocity: s.key_velocity,
+            sync: s.t.sync,
+            midi_out: Some(s.out_port.clone()),
+        },
+    }
+}
+
+/// A program's pads that differ from the default.
+fn describe_pads(program: usize, all: &[Pad]) -> Vec<PadFile> {
     let default = Pad::default();
     let mut pads = Vec::new();
-    for (i, p) in s.pads.iter().enumerate() {
+    for (i, p) in all.iter().enumerate() {
         let sound = p.sound.as_ref().map(|snd| SoundFile {
             name: snd.name.clone(),
-            file: sound_file(i),
+            file: sound_file(program, i),
             frames: snd.frames.len(),
             start: snd.start,
             end: snd.end,
@@ -152,10 +205,12 @@ fn describe(s: &Shared) -> ProjectFile {
             pads.push(file);
         }
     }
+    pads
+}
 
-    let fresh = Sequence::default();
-    let sequences = s
-        .seqs
+/// The sequences that differ from `fresh`.
+fn describe_seqs(s: &Shared, fresh: &Sequence) -> Vec<SeqFile> {
+    s.seqs
         .iter()
         .enumerate()
         .filter_map(|(index, q)| {
@@ -163,11 +218,12 @@ fn describe(s: &Shared) -> ProjectFile {
                 .tracks
                 .iter()
                 .enumerate()
-                .filter(|(_, t)| !t.on || t.out.is_some() || !t.notes.is_empty() || !t.name.is_empty())
+                .filter(|(_, t)| !t.on || t.bus != 1 || t.out.is_some() || !t.notes.is_empty() || !t.name.is_empty())
                 .map(|(index, t)| TrackFile {
                     index,
                     name: t.name.clone(),
                     on: t.on,
+                    bus: t.bus,
                     out: t.out,
                     notes: t
                         .notes
@@ -198,28 +254,7 @@ fn describe(s: &Shared) -> ProjectFile {
                 tracks,
             })
         })
-        .collect();
-
-    ProjectFile {
-        version: VERSION,
-        master: s.master,
-        timing: s.t.timing,
-        swing: s.t.swing,
-        count_in: s.t.count_in,
-        click: s.t.click,
-        pads,
-        sequences,
-        song: SongFile {
-            steps: s.song.steps.iter().map(|&(seq, reps)| [seq as u32, reps]).collect(),
-            looping: s.song.looping,
-        },
-        setup: SetupFile {
-            clock_out: s.t.clock_out,
-            key_velocity: s.key_velocity,
-            sync: s.t.sync,
-            midi_out: Some(s.out_port.clone()),
-        },
-    }
+        .collect()
 }
 
 fn pad_file(pad: usize, p: &Pad, sound: Option<SoundFile>) -> PadFile {
@@ -244,8 +279,8 @@ fn pad_file(pad: usize, p: &Pad, sound: Option<SoundFile>) -> PadFile {
     }
 }
 
-fn sound_file(pad: usize) -> String {
-    format!("sounds/{}.wav", pad_name(pad))
+fn sound_file(program: usize, pad: usize) -> String {
+    format!("sounds/P{:02}-{}.wav", program + 1, pad_name(pad))
 }
 
 /// Everything a save writes, taken while holding the engine lock; the slow file writing then
@@ -258,10 +293,15 @@ pub struct Snapshot {
 
 pub fn snapshot(s: &Shared) -> Snapshot {
     let sounds = s
-        .pads
+        .programs
         .iter()
         .enumerate()
-        .filter_map(|(i, p)| p.sound.as_ref().map(|snd| (sound_file(i), snd.frames.clone())))
+        .flat_map(|(n, p)| {
+            p.pads
+                .iter()
+                .enumerate()
+                .filter_map(move |(i, p)| p.sound.as_ref().map(|snd| (sound_file(n, i), snd.frames.clone())))
+        })
         .collect();
     Snapshot { file: describe(s), sounds, rate: s.rate }
 }
@@ -294,31 +334,16 @@ pub fn fingerprint(s: &Shared) -> u64 {
     let mut h = DefaultHasher::new();
     serde_json::to_string(&describe(s)).unwrap_or_default().hash(&mut h);
     // Sound contents only change by replacing the frames, so their identity is enough.
-    for p in &s.pads {
+    for p in s.programs.iter().flat_map(|p| &p.pads) {
         p.sound.as_ref().map(|snd| std::sync::Arc::as_ptr(&snd.frames) as *const u8 as usize).hash(&mut h);
     }
     h.finish()
 }
 
-/// A project read from disk, ready to replace the open one.
-pub struct Loaded {
-    pads: Vec<Pad>,
-    seqs: Vec<Sequence>,
-    song: Song,
-    file: ProjectFile,
-}
-
-/// Reads the project in `root`, resampling its sounds to `rate`. Nothing is replaced yet, so a
-/// broken project leaves the open one untouched.
-pub fn load(root: &Path, rate: u32) -> Result<Loaded, String> {
-    let json = fs::read_to_string(root.join(FILE)).map_err(|e| e.to_string())?;
-    let mut file: ProjectFile = serde_json::from_str(&json).map_err(|e| format!("{FILE}: {e}"))?;
-    if file.version > VERSION {
-        return Err("Made by a newer rsampler".to_owned());
-    }
-
+/// A program's pads from the project file, with their sounds read from `root`.
+fn load_pads(list: Vec<PadFile>, root: &Path, rate: u32, version: u32) -> Result<Vec<Pad>, String> {
     let mut pads: Vec<Pad> = (0..PADS).map(|_| Pad::default()).collect();
-    for p in std::mem::take(&mut file.pads) {
+    for p in list {
         let Some(slot) = pads.get_mut(p.pad) else { continue };
         let sound = match p.sound {
             Some(snd) => {
@@ -334,7 +359,7 @@ pub fn load(root: &Path, rate: u32) -> Result<Loaded, String> {
             None => None,
         };
         let mut decay = p.decay.min(100);
-        if file.version < 2 && !p.decay_from_start {
+        if version < 2 && !p.decay_from_start {
             // Version 1 faded from `decay` percent of the sound to its end; turn that into the
             // same fade length.
             let secs = sound.as_ref().map_or(0.0, |s| (s.end - s.start) as f32 / rate as f32);
@@ -370,6 +395,41 @@ pub fn load(root: &Path, rate: u32) -> Result<Loaded, String> {
         };
     }
 
+    Ok(pads)
+}
+
+/// A project read from disk, ready to replace the open one.
+pub struct Loaded {
+    programs: Vec<Program>,
+    drums: [usize; DRUMS],
+    seqs: Vec<Sequence>,
+    song: Song,
+    file: ProjectFile,
+}
+
+/// Reads the project in `root`, resampling its sounds to `rate`. Nothing is replaced yet, so a
+/// broken project leaves the open one untouched.
+pub fn load(root: &Path, rate: u32) -> Result<Loaded, String> {
+    let json = fs::read_to_string(root.join(FILE)).map_err(|e| e.to_string())?;
+    let mut file: ProjectFile = serde_json::from_str(&json).map_err(|e| format!("{FILE}: {e}"))?;
+    if file.version > VERSION {
+        return Err("Made by a newer rsampler".to_owned());
+    }
+
+    // Before version 3 the one program was in `pads`.
+    let old = std::mem::take(&mut file.pads);
+    let mut programs = Vec::new();
+    for p in std::mem::take(&mut file.programs).into_iter().take(PROGRAMS) {
+        programs.push(Program {
+            name: p.name.chars().take(16).collect(),
+            pads: load_pads(p.pads, root, rate, file.version)?,
+        });
+    }
+    if programs.is_empty() {
+        programs.push(Program { name: "NewPgm-A".to_owned(), pads: load_pads(old, root, rate, file.version)? });
+    }
+    let drums = file.drums.map(|d| d.min(programs.len() - 1));
+
     let mut seqs: Vec<Sequence> = (0..SEQUENCES).map(|_| Sequence::default()).collect();
     for q in std::mem::take(&mut file.sequences) {
         let Some(seq) = seqs.get_mut(q.index) else { continue };
@@ -383,6 +443,7 @@ pub fn load(root: &Path, rate: u32) -> Result<Loaded, String> {
             let track = &mut seq.tracks[t.index];
             track.name = t.name.chars().take(16).collect();
             track.on = t.on;
+            track.bus = t.bus.min(DRUMS as u8);
             track.out = t.out.filter(|ch| *ch < 16);
             for n in t.notes {
                 let [tick, pad, velocity, duration, ..] = n[..] else { continue };
@@ -414,15 +475,15 @@ pub fn load(root: &Path, rate: u32) -> Result<Loaded, String> {
         looping: file.song.looping,
     };
 
-    Ok(Loaded { pads, seqs, song, file })
+    Ok(Loaded { programs, drums, seqs, song, file })
 }
 
 impl Loaded {
     /// Replaces the open project; quick enough to do while holding the engine lock.
     pub fn apply(self, s: &mut Shared) {
-        let Loaded { pads, seqs, song, file } = self;
+        let Loaded { programs, drums, seqs, song, file } = self;
         s.stop();
-        s.pads = pads;
+        (s.programs, s.drums) = (programs, drums);
         s.seqs = seqs;
         s.song = song;
         s.master = file.master.clamp(0.0, 1.0);
@@ -469,17 +530,17 @@ mod tests {
         let rate = 48_000;
         let mut s = audio::offline_shared(rate);
         for (pad, sound) in audio::builtin_kit(rate).into_iter().enumerate() {
-            s.pads[pad].sound = Some(sound);
+            s.programs[0].pads[pad].sound = Some(sound);
         }
-        s.pads[0].tune = -35;
-        let kick = s.pads[0].sound.as_mut().unwrap();
+        s.programs[0].pads[0].tune = -35;
+        let kick = s.programs[0].pads[0].sound.as_mut().unwrap();
         (kick.loop_to, kick.looping) = (500, true);
-        s.pads[1].overlap = Overlap::NoteOff;
-        s.pads[2].mutes = [Some(3), None];
-        s.pads[2].generation = Generation::VelSw;
-        s.pads[2].also = [Some(0), Some(1)];
-        s.pads[2].switch = [40, 90];
-        s.pads[3].sound.as_mut().unwrap().start = 100;
+        s.programs[0].pads[1].overlap = Overlap::NoteOff;
+        s.programs[0].pads[2].mutes = [Some(3), None];
+        s.programs[0].pads[2].generation = Generation::VelSw;
+        s.programs[0].pads[2].also = [Some(0), Some(1)];
+        s.programs[0].pads[2].switch = [40, 90];
+        s.programs[0].pads[3].sound.as_mut().unwrap().start = 100;
         s.seqs[4].tempo = 93.5;
         s.seqs[4].set_bars(4);
         s.seqs[4].tracks[2].insert(Note {
@@ -491,6 +552,12 @@ mod tests {
         });
         s.seqs[4].tracks[5].on = false;
         s.seqs[4].tracks[6].out = Some(3);
+        s.seqs[4].tracks[6].bus = 2;
+        // A second program, with the clap on its pad B03, played by DRUM2.
+        let mut two = crate::program::Program::new("Second");
+        two.pads[18].sound = s.programs[0].pads[3].sound.clone();
+        s.programs.push(two);
+        s.drums = [0, 1, 0, 1];
         s.t.clock_out = true;
         s.key_velocity = 90;
         s.t.swing = 62;
@@ -507,19 +574,22 @@ mod tests {
         load(&root, rate).unwrap().apply(&mut t);
         fs::remove_dir_all(&dir).unwrap();
 
-        assert_eq!(t.pads[0].tune, -35);
-        let kick = t.pads[0].sound.as_ref().unwrap();
+        assert_eq!(t.programs[0].pads[0].tune, -35);
+        assert_eq!((t.programs.len(), t.programs[1].name.as_str(), t.drums), (2, "Second", [0, 1, 0, 1]));
+        assert_eq!(t.programs[1].pads[18].sound.as_ref().unwrap().name, "CLAP");
+        assert_eq!(t.seqs[4].tracks[6].bus, 2);
+        let kick = t.programs[0].pads[0].sound.as_ref().unwrap();
         assert_eq!((kick.loop_to, kick.looping), (500, true));
-        assert_eq!(t.pads[1].overlap, Overlap::NoteOff);
-        assert_eq!(t.pads[2].mutes, [Some(3), None]);
+        assert_eq!(t.programs[0].pads[1].overlap, Overlap::NoteOff);
+        assert_eq!(t.programs[0].pads[2].mutes, [Some(3), None]);
         assert_eq!(
-            (t.pads[2].generation, t.pads[2].also, t.pads[2].switch),
+            (t.programs[0].pads[2].generation, t.programs[0].pads[2].also, t.programs[0].pads[2].switch),
             (Generation::VelSw, [Some(0), Some(1)], [40, 90])
         );
-        let clap = t.pads[3].sound.as_ref().unwrap();
+        let clap = t.programs[0].pads[3].sound.as_ref().unwrap();
         assert_eq!((clap.name.as_str(), clap.start), ("CLAP", 100));
-        assert_eq!(&*clap.frames, &*s.pads[3].sound.as_ref().unwrap().frames);
-        assert!(t.pads[4].sound.is_none());
+        assert_eq!(&*clap.frames, &*s.programs[0].pads[3].sound.as_ref().unwrap().frames);
+        assert!(t.programs[0].pads[4].sound.is_none());
         assert_eq!((t.seqs[4].tempo, t.seqs[4].bars), (93.5, 4));
         assert_eq!(t.seqs[4].tracks[2].notes, s.seqs[4].tracks[2].notes);
         assert!(!t.seqs[4].tracks[5].on);
@@ -543,20 +613,24 @@ mod tests {
         let rate = 48_000;
         let mut s = audio::offline_shared(rate);
         // Two seconds of sound; version 1 started the fade halfway through.
-        s.pads[0].sound = Some(Sound::new("TONE", vec![[0.1f32; 2]; 2 * rate as usize].into()));
-        s.pads[0].decay = 50;
-        s.pads[1].decay = 30;
-        s.pads[1].decay_from_start = true;
+        s.programs[0].pads[0].sound = Some(Sound::new("TONE", vec![[0.1f32; 2]; 2 * rate as usize].into()));
+        s.programs[0].pads[0].decay = 50;
+        s.programs[0].pads[1].decay = 30;
+        s.programs[0].pads[1].decay_from_start = true;
         let dir = std::env::temp_dir().join(format!("rsampler-v1-{}", std::process::id()));
         let root = save(&snapshot(&s), &dir, "Old").unwrap();
-        let json = fs::read_to_string(root.join(FILE)).unwrap().replace("\"version\": 2", "\"version\": 1");
-        fs::write(root.join(FILE), json).unwrap();
+        // Rewritten as version 1 had it: one program, in `pads`.
+        let mut json: serde_json::Value = serde_json::from_str(&fs::read_to_string(root.join(FILE)).unwrap()).unwrap();
+        json["version"] = 1.into();
+        json["pads"] = json["programs"][0]["pads"].take();
+        json.as_object_mut().unwrap().remove("programs");
+        fs::write(root.join(FILE), json.to_string()).unwrap();
         let mut t = audio::offline_shared(rate);
         load(&root, rate).unwrap().apply(&mut t);
         fs::remove_dir_all(&dir).unwrap();
         // A one-second fade is decay 71 (0.71² × 2 s); START mode keeps its value.
-        assert_eq!(t.pads[0].decay, 71);
-        assert_eq!(t.pads[1].decay, 30);
+        assert_eq!(t.programs[0].pads[0].decay, 71);
+        assert_eq!(t.programs[0].pads[1].decay, 30);
     }
 
     #[test]

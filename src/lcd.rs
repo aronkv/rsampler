@@ -67,6 +67,8 @@ pub enum Screen {
     NextSeq,
     /// OPEN WINDOW on the sequence and track fields: name, copy, delete.
     SeqWin,
+    /// OPEN WINDOW on PROGRAM's `Pgm`: new, copy, delete, name.
+    PgmWin,
     TrWin,
     /// MISC: PUNCH, TRANS and 2ND SEQ.
     Punch,
@@ -126,6 +128,7 @@ impl Screen {
             }
             Screen::TrMute { .. } => ["", "", "", "", "", "SOLO"],
             Screen::SeqWin | Screen::TrWin => ["", "", "COPY", "DELETE", "NAME", "CLOSE"],
+            Screen::PgmWin => ["", "NEW", "COPY", "DELETE", "NAME", "CLOSE"],
             Screen::Punch | Screen::Trans | Screen::SecondSeq => ["PUNCH", "TRANS", "2ND SEQ", "", "", "ON/OFF"],
         }
     }
@@ -232,6 +235,8 @@ pub enum Field {
     TransAmount,
     SecondSeq,
     CopyTo,
+    Bus,
+    Pgm,
 }
 
 /// The settings of the sequence EDIT screens, kept between visits like on the MPC.
@@ -291,6 +296,10 @@ pub fn pan_text(pan: i32) -> String {
         p if p < 0 => format!("L{}", -p),
         p => format!("R{p}"),
     }
+}
+
+pub fn bus_name(bus: u8) -> String {
+    if bus == 0 { "MIDI".to_owned() } else { format!("DRUM{bus}") }
 }
 
 fn mute_text(m: Option<u8>) -> String {
@@ -360,7 +369,7 @@ fn sound_name(v: &View) -> String {
 }
 
 fn sound_name_of(s: &Shared, pad: usize) -> String {
-    s.pads[pad].sound.as_ref().map_or("(no sound)".to_owned(), |s| s.name.chars().take(20).collect())
+    s.pads()[pad].sound.as_ref().map_or("(no sound)".to_owned(), |s| s.name.chars().take(20).collect())
 }
 
 pub fn rows(v: &View) -> Vec<Row> {
@@ -427,6 +436,8 @@ pub fn rows(v: &View) -> Vec<Row> {
                         t(format!("-{}", crate::seq::track_name(tr, track))),
                         t("  On:"),
                         f(Field::TrackOn, if track.on { "YES" } else { "NO" }),
+                        t("  Bus:"),
+                        f(Field::Bus, bus_name(track.bus)),
                         t("  Out:"),
                         f(Field::TrackOut, track.out.map_or("OFF".to_owned(), |ch| (ch + 1).to_string())),
                         t(if s.t.solo == Some(tr) { "  SOLO" } else { "" }),
@@ -575,6 +586,27 @@ pub fn rows(v: &View) -> Vec<Row> {
             }
             rows
         }
+        Screen::PgmWin => {
+            let p = s.program();
+            let name = if v.editing { format!("{}_", v.name) } else { s.programs[p].name.clone() };
+            let drums =
+                s.drums.iter().enumerate().map(|(i, d)| format!("DRUM{}:{:02}", i + 1, d + 1)).collect::<Vec<_>>();
+            let mut rows = vec![
+                row(
+                    vec![
+                        t("PROGRAM  Pgm:"),
+                        f(Field::Pgm, format!("{:02}", p + 1)),
+                        t(format!(" of {}", s.programs.len())),
+                    ],
+                    vec![],
+                ),
+                row(vec![t(format!("Name:{name}"))], vec![t(if v.editing { "ENTER: done  ESC: cancel" } else { "" })]),
+                row(vec![t(drums.join("  "))], vec![]),
+                row(vec![t("NEW: empty program  COPY: copy of this one")], vec![]),
+            ];
+            msg(&mut rows);
+            rows
+        }
         Screen::SeqWin | Screen::TrWin => {
             use crate::seq::{seq_name, track_name};
             let seq_win = matches!(v.screen, Screen::SeqWin);
@@ -684,7 +716,7 @@ pub fn rows(v: &View) -> Vec<Row> {
             rows
         }
         Screen::Velo => {
-            let (velo, env) = (s.pads[v.pad].velo, s.pads[v.pad].fenv);
+            let (velo, env) = (s.pads()[v.pad].velo, s.pads()[v.pad].fenv);
             let num = |field, v: u32| f(field, format!("{v:3}"));
             let mut rows = vec![
                 row(vec![t("VELO/ENV  Pad:"), f(Field::Pad, pad_name(v.pad))], vec![t(sound_name(v))]),
@@ -696,7 +728,7 @@ pub fn rows(v: &View) -> Vec<Row> {
                     vec![t("Velo>Start: "), num(Field::VeloStart, velo.start)],
                     vec![t("Velo>Filter:"), num(Field::VeloFilter, velo.filter)],
                 ),
-                row(vec![t(format!("FILTER ENVELOPE  (Filter:{})", s.pads[v.pad].cutoff))], vec![]),
+                row(vec![t(format!("FILTER ENVELOPE  (Filter:{})", s.pads()[v.pad].cutoff))], vec![]),
                 row(
                     vec![
                         t("Attack:"),
@@ -738,7 +770,7 @@ pub fn rows(v: &View) -> Vec<Row> {
         Screen::Assign => {
             use crate::program::VarParam;
             let (pad, param, value) = v.var;
-            let base = &s.pads[pad];
+            let base = &s.pads()[pad];
             let varied = base.varied(Some((param, value)));
             let effect = match param {
                 VarParam::Tune => format!("Tune:{:+.1}", varied.tune as f32 / 10.0),
@@ -814,7 +846,7 @@ pub fn rows(v: &View) -> Vec<Row> {
                 vec![t(format!("Now:{}", seq.bbt(s.now())))],
             )];
             let name = |pad: u8| {
-                s.pads[pad as usize].sound.as_ref().map_or(String::new(), |snd| snd.name.chars().take(8).collect())
+                s.pads()[pad as usize].sound.as_ref().map_or(String::new(), |snd| snd.name.chars().take(8).collect())
             };
             let start = v.step.saturating_sub(1).min(notes.len().saturating_sub(4));
             for (i, n) in notes.iter().enumerate().skip(start).take(4) {
@@ -845,11 +877,15 @@ pub fn rows(v: &View) -> Vec<Row> {
             rows
         }
         Screen::Program => {
-            let p = &s.pads[v.pad];
+            let p = &s.pads()[v.pad];
             let mut rows = vec![
                 row(
                     vec![t("PROGRAM  Pad:"), f(Field::Pad, pad_name(v.pad)), t(format!("  {}", sound_name(v)))],
-                    vec![],
+                    vec![
+                        t("Pgm:"),
+                        f(Field::Pgm, format!("{:02}", s.program() + 1)),
+                        t(format!("-{}", s.programs[s.program()].name)),
+                    ],
                 ),
                 row(
                     vec![
@@ -915,7 +951,7 @@ pub fn rows(v: &View) -> Vec<Row> {
             rows
         }
         Screen::Mixer => {
-            let p = &s.pads[v.pad];
+            let p = &s.pads()[v.pad];
             vec![
                 row(
                     vec![t(format!("MIXER  Bank:{}", ["A", "B", "C", "D"][v.pad / 16]))],
@@ -935,7 +971,7 @@ pub fn rows(v: &View) -> Vec<Row> {
         Screen::Trim => {
             let secs = |frames: usize| format!("{:.3}s", frames as f32 / s.rate as f32);
             let (st, end, len) =
-                s.pads[v.pad].sound.as_ref().map_or((0, 0, 0), |snd| (snd.start, snd.end, snd.frames.len()));
+                s.pads()[v.pad].sound.as_ref().map_or((0, 0, 0), |snd| (snd.start, snd.end, snd.frames.len()));
             vec![
                 row(
                     vec![t("TRIM  Pad:"), f(Field::Pad, pad_name(v.pad)), t(format!("  {}", sound_name(v)))],
@@ -954,7 +990,7 @@ pub fn rows(v: &View) -> Vec<Row> {
         Screen::Loop => {
             let secs = |frames: usize| format!("{:.3}s", frames as f32 / s.rate as f32);
             let (to, end, looping) =
-                s.pads[v.pad].sound.as_ref().map_or((0, 0, false), |snd| (snd.loop_to, snd.end, snd.looping));
+                s.pads()[v.pad].sound.as_ref().map_or((0, 0, false), |snd| (snd.loop_to, snd.end, snd.looping));
             vec![
                 row(
                     vec![t("LOOP  Pad:"), f(Field::Pad, pad_name(v.pad)), t(format!("  {}", sound_name(v)))],

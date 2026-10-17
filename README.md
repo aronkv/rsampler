@@ -132,6 +132,7 @@ The MAIN screen (**MAIN SCREEN** or **Esc**) shows the sequencer:
 | `Loop`        | Loop the sequence                                                    |
 | `Bars`        | Sequence length                                                      |
 | `Tr`, `On`    | Track 1–64 and whether it plays                                      |
+| `Bus`         | DRUM1–4: the program the track plays (see [PROGRAM](#program-how-each-pad-plays)); MIDI: no sound of its own, only MIDI out |
 | `Out`         | MIDI channel the track's notes are sent on (see [MIDI](#midi)), OFF by default |
 
 To record:
@@ -228,6 +229,15 @@ takes back everything done since opening the screen.
 
 Open it with the blue **6 / PROGRAM** key. Hit a pad (or change `Pad`) to choose it.
 
+**Programs and DRUM buses.** As on the MPC, there can be up to 24 programs, each a full set of 64
+pads. Every track has a `Bus` (on the MAIN screen): DRUM1–4, or MIDI for a track that only sends
+its notes out over MIDI. Each DRUM bus plays one program, chosen with `Pgm` on the PROGRAM screen
+for the selected track's bus. The pads, and the PROGRAM, MIXER and TRIM screens, always work on
+the program of the selected track, so a drum kit and a set of chopped samples can play side by
+side from different tracks. **OPEN WINDOW** (`Ctrl+Enter`) on `Pgm` opens the PROGRAM window:
+**NEW** (F2) makes an empty program and **COPY** (F3) a copy of this one, both put on the track's
+bus; **DELETE** (F4) removes this one, **NAME** (F5) names it, **CLOSE** (F6) goes back.
+
 | Field     | What it does                                                               |
 | --------- | -------------------------------------------------------------------------- |
 | `Tune`    | ±12 semitones, in 0.1 steps                                                 |
@@ -322,8 +332,8 @@ WAV files of any bit depth and sample rate work, mono or stereo. The MPC2000XL's
 sounds load too, with their trim points, loop and tuning, so old MPC sound libraries can be used
 directly.
 
-An MPC2000XL program (`.PGM`, or the first program of an `.APS` file) loads onto all 64 pads at
-once (press `Enter` twice): each pad gets
+An MPC2000XL program (`.PGM`) loads into the current program, all 64 pads at once (press `Enter`
+twice); an `.APS` file replaces all programs with its programs and their DRUM buses. Each pad gets
 its sound from the `.SND` files next to the program, with the program's tuning, envelope, filter,
 overlap, mute assign, SIMULT / VEL SW mode, velocity modulation, filter envelope, level and pan.
 Sounds that are not there are listed on the LCD.
@@ -346,7 +356,7 @@ from −60 to 0 dBFS with the threshold marked. **REC** (F6) waits for the thres
 
 **MPC `.ALL` files** hold every sequence and the songs of an MPC2000XL. Loading one (press `Enter`
 twice) replaces all sequences and the song with its sequences, with their tempo, length, time
-signature, loop, muted tracks, notes and NOTE VARIATION, and its first song. Its notes are played
+signature, loop, names, muted tracks, track buses, notes and NOTE VARIATION, and its first song. Its notes are played
 by the program they were made with: if no MPC program is loaded yet, the `.APS` file of the same
 name next to it is loaded first, so an MPC disk's `NAME.ALL` + `NAME.APS` + sounds come back as
 they were saved.
@@ -440,7 +450,7 @@ shows the version and the output sample rate.
 ### Not there yet
 
 - Windows-specific testing
-- Effects and the MPC's multiple programs per project (one program plays all tracks here)
+- Effects
 
 ## Reference
 

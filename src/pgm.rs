@@ -128,117 +128,143 @@ fn pads<'a>(
         .collect()
 }
 
-/// The programs of an `.APS` file. Its note blocks have one byte more than a `.PGM`'s, after
-/// the sound index.
-pub fn parse_aps(b: &[u8]) -> Result<Vec<Pgm>, String> {
+/// An `.APS` file's programs with their slot numbers, and the slot each DRUM bus plays.
+pub type Aps = (Vec<(usize, Pgm)>, [usize; 4]);
+
+/// The programs of an `.APS` file, each with its slot number, and the program slot each DRUM
+/// bus plays. Its note blocks have one byte more than a `.PGM`'s, after the sound index.
+pub fn parse_aps(b: &[u8]) -> Result<Aps, String> {
     const PROGRAM: usize = 2350;
+    let invalid = || "Not an MPC2000XL APS file".to_owned();
     if b.len() < 4 {
-        return Err("Not an MPC2000XL APS file".to_owned());
+        return Err(invalid());
     }
     let count = u16::from_le_bytes([b[2], b[3]]) as usize;
     let names_end = 4 + 17 * count;
-    // Name, global settings, the assign table, then four drum mixers and their settings.
-    let first = names_end + 2 + 17 + 8 + 64 + 7 + (384 + 9) * 4 + 15 - 6;
+    // Name, global settings and the assign table, then four drum mixers with their settings.
+    let drums_at = names_end + 2 + 17 + 8 + 64 + 7;
+    let first = drums_at + (384 + 9) * 4 + 15 - 6;
     let programs = b.len().saturating_sub(1689 + 17 * count) / PROGRAM;
     if programs == 0 || b.len() < first + PROGRAM {
-        return Err("Not an MPC2000XL APS file".to_owned());
+        return Err(invalid());
     }
     let sounds: Vec<String> = (0..count).map(|i| text(&b[4 + 17 * i..4 + 17 * (i + 1)])).collect();
-    Ok((0..programs)
-        .map(|i| &b[first + i * (PROGRAM + 4)..][..PROGRAM])
-        .take_while(|p| p.len() == PROGRAM)
-        .map(|p| Pgm {
-            name: text(&p[6..23]),
-            pads: pads(
-                &p[2090..2154],
-                |n| {
-                    let q = &p[38 + n * 26..38 + (n + 1) * 26];
-                    [&q[..1], &q[2..]].concat()
-                },
-                |n| &p[1703 + n * MIXER_BYTES..1703 + (n + 1) * MIXER_BYTES],
-                &sounds,
-            ),
+    let drums = [0, 1, 2, 3].map(|i| b[drums_at + i * (384 + 9 + 3) + 384 + 5] as usize);
+    let programs = (0..programs)
+        .map_while(|i| b.get(first + i * (PROGRAM + 4)..first + i * (PROGRAM + 4) + PROGRAM))
+        .map(|p| {
+            let pgm = Pgm {
+                name: text(&p[6..23]),
+                pads: pads(
+                    &p[2090..2154],
+                    |n| {
+                        let q = &p[38 + n * 26..38 + (n + 1) * 26];
+                        [&q[..1], &q[2..]].concat()
+                    },
+                    |n| &p[1703 + n * MIXER_BYTES..1703 + (n + 1) * MIXER_BYTES],
+                    &sounds,
+                ),
+            };
+            (p[0] as usize, pgm)
         })
-        .collect())
+        .collect();
+    Ok((programs, drums))
 }
 
-pub struct Loaded {
+pub struct LoadedProgram {
     pub name: String,
     pub pads: Vec<Pad>,
-    /// Sounds that were not found next to the program.
-    pub missing: Vec<String>,
     /// Which pad plays each MPC drum note (35–98), for importing the MPC's sequences.
     pub note_pads: [Option<u8>; 64],
 }
 
-/// Loads a program and its sounds as the 64 pads; from an `.APS` file, its first program.
+pub struct Loaded {
+    pub programs: Vec<LoadedProgram>,
+    /// From an `.APS` file: the program (index into `programs`) each DRUM bus plays.
+    pub drums: Option<[usize; 4]>,
+    /// Sounds that were not found next to the program.
+    pub missing: Vec<String>,
+}
+
+/// Loads a `.PGM` program, or all programs of an `.APS` file, with their sounds.
 pub fn load(path: &Path, rate: u32) -> Result<Loaded, String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-    let pgm = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("aps")) {
-        parse_aps(&bytes)?.swap_remove(0)
+    let (pgms, drums) = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("aps")) {
+        let (pgms, slots) = parse_aps(&bytes)?;
+        // The drums name program slots; programs are kept in file order.
+        let drums = slots.map(|slot| pgms.iter().position(|(s, _)| *s == slot).unwrap_or(0));
+        (pgms.into_iter().map(|(_, p)| p).collect(), Some(drums))
     } else {
-        parse(&bytes)?
+        (vec![parse(&bytes)?], None)
     };
     let dir = path.parent().unwrap_or(Path::new("."));
     let files: Vec<_> = std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).collect();
-    // Sound names are matched without regard to case, as MPC disks are case-insensitive.
-    let find = |name: &str| {
-        files.iter().find(|p| {
+    let mut missing = Vec::new();
+    // A sound used by several programs is read once.
+    let mut cache: Vec<(String, Option<(crate::program::Sound, i32)>)> = Vec::new();
+    let mut sound = |name: &String| {
+        if let Some((_, s)) = cache.iter().find(|(n, _)| n == name) {
+            return s.clone();
+        }
+        // Sound names are matched without regard to case, as MPC disks are case-insensitive.
+        let file = files.iter().find(|p| {
             p.file_stem().is_some_and(|s| s.to_string_lossy().eq_ignore_ascii_case(name))
                 && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("snd"))
-        })
-    };
-    // Pads mute other pads by their note.
-    let pad_of_note = |note: usize| pgm.pads.iter().position(|p| p.as_ref().is_some_and(|(n, _)| *n == note));
-
-    let mut missing = Vec::new();
-    let mut pads = Vec::with_capacity(PADS);
-    for entry in &pgm.pads {
-        let Some((_, q)) = entry else {
-            pads.push(Pad::default());
-            continue;
-        };
-        let (sound, snd_tune) = match &q.sound {
-            Some(name) => match find(name).map(|p| snd::load(p, rate)) {
-                Some(Ok((sound, tune))) => (Some(sound), tune),
-                _ => {
-                    if !missing.contains(name) {
-                        missing.push(name.clone());
-                    }
-                    (None, 0)
-                }
-            },
-            None => (None, 0),
-        };
-        pads.push(Pad {
-            sound,
-            // The sound's own tuning adds to the note's, as on the MPC.
-            tune: (q.tune + snd_tune).clamp(-120, 120),
-            attack: q.attack,
-            decay: q.decay,
-            decay_from_start: q.decay_from_start,
-            cutoff: q.cutoff,
-            resonance: q.resonance,
-            overlap: q.overlap,
-            mutes: q.mutes.map(|m| m.and_then(pad_of_note).map(|p| p as u8)),
-            level: q.level,
-            pan: q.pan,
-            generation: q.generation,
-            also: q.also.map(|m| m.and_then(pad_of_note).map(|p| p as u8)),
-            switch: q.switch,
-            velo: q.velo,
-            fenv: q.fenv,
         });
-    }
-    let mut note_pads = [None; 64];
-    for (pad, entry) in pgm.pads.iter().enumerate() {
-        if let Some((note, _)) = entry
-            && note_pads[*note].is_none()
-        {
-            note_pads[*note] = Some(pad as u8);
+        let loaded = file.and_then(|p| snd::load(p, rate).ok());
+        if loaded.is_none() && !missing.contains(name) {
+            missing.push(name.clone());
         }
-    }
-    Ok(Loaded { name: pgm.name, pads, missing, note_pads })
+        cache.push((name.clone(), loaded.clone()));
+        loaded
+    };
+    let programs = pgms
+        .into_iter()
+        .map(|pgm| {
+            // Pads mute other pads by their note.
+            let pad_of_note = |note: usize| pgm.pads.iter().position(|p| p.as_ref().is_some_and(|(n, _)| *n == note));
+            let mut pads = Vec::with_capacity(PADS);
+            for entry in &pgm.pads {
+                let Some((_, q)) = entry else {
+                    pads.push(Pad::default());
+                    continue;
+                };
+                let (snd, snd_tune) = match q.sound.as_ref().and_then(&mut sound) {
+                    Some((s, tune)) => (Some(s), tune),
+                    None => (None, 0),
+                };
+                pads.push(Pad {
+                    sound: snd,
+                    // The sound's own tuning adds to the note's, as on the MPC.
+                    tune: (q.tune + snd_tune).clamp(-120, 120),
+                    attack: q.attack,
+                    decay: q.decay,
+                    decay_from_start: q.decay_from_start,
+                    cutoff: q.cutoff,
+                    resonance: q.resonance,
+                    overlap: q.overlap,
+                    mutes: q.mutes.map(|m| m.and_then(pad_of_note).map(|p| p as u8)),
+                    level: q.level,
+                    pan: q.pan,
+                    generation: q.generation,
+                    also: q.also.map(|m| m.and_then(pad_of_note).map(|p| p as u8)),
+                    switch: q.switch,
+                    velo: q.velo,
+                    fenv: q.fenv,
+                });
+            }
+            let mut note_pads = [None; 64];
+            for (pad, entry) in pgm.pads.iter().enumerate() {
+                if let Some((note, _)) = entry
+                    && note_pads[*note].is_none()
+                {
+                    note_pads[*note] = Some(pad as u8);
+                }
+            }
+            LoadedProgram { name: pgm.name, pads, note_pads }
+        })
+        .collect();
+    Ok(Loaded { programs, drums, missing })
 }
 
 #[cfg(test)]
@@ -334,11 +360,12 @@ mod tests {
         (b[q], b[q + 1], b[q + 7]) = (0, 0xEE, 0);
         b[q + 10..q + 12].copy_from_slice(&(-20i16).to_le_bytes());
         b[p + 1703 + 6 + 1] = 77;
-        let pgms = parse_aps(&b).unwrap();
-        assert_eq!(pgms.len(), 1);
-        assert_eq!(pgms[0].name, "PROG");
-        assert!(pgms[0].pads[0].is_none());
-        let (note, q) = pgms[0].pads[1].as_ref().unwrap();
+        let (pgms, drums) = parse_aps(&b).unwrap();
+        assert_eq!((pgms.len(), drums), (1, [0; 4]));
+        let pgm = &pgms[0].1;
+        assert_eq!(pgm.name, "PROG");
+        assert!(pgm.pads[0].is_none());
+        let (note, q) = pgm.pads[1].as_ref().unwrap();
         assert_eq!((*note, q.sound.as_deref(), q.tune, q.level), (1, Some("OBOE"), -20, 77));
         assert!(parse_aps(&b[..3000]).is_err());
     }
@@ -359,7 +386,8 @@ mod tests {
         snd.extend(44_100u16.to_le_bytes());
         snd.extend([0, 1, 0, 2]);
         std::fs::write(dir.join("snare.snd"), snd).unwrap();
-        let Loaded { name, pads, missing, note_pads } = load(&dir.join("TEST.PGM"), 44_100).unwrap();
+        let Loaded { mut programs, missing, .. } = load(&dir.join("TEST.PGM"), 44_100).unwrap();
+        let LoadedProgram { name, pads, note_pads } = programs.remove(0);
         // Note 37 is on pad 1, note 36 on pad 2.
         assert_eq!((note_pads[2], note_pads[1], note_pads[0]), (Some(0), Some(1), None));
         std::fs::remove_dir_all(&dir).unwrap();

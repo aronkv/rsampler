@@ -85,7 +85,8 @@ struct App {
     /// Selected step on the SONG screen.
     song_step: usize,
     /// Pads of the MPC drum notes 35–98, from the last loaded MPC program.
-    mpc_notes: Option<[Option<u8>; 64]>,
+    /// Per program, from the last loaded MPC programs.
+    mpc_notes: Vec<Option<[Option<u8>; 64]>>,
     /// NOTE VARIATION: the pad the slider affects, what it changes, and the slider (0..=127).
     var_pad: usize,
     var_param: program::VarParam,
@@ -147,7 +148,8 @@ struct App {
     edit_ratio: u32,
     seq_edit: lcd::SeqEdit,
     /// The pads as they were before the last sound edit, for UNDO SEQ on the TRIM screens.
-    sound_undo: Option<Vec<(usize, program::Pad)>>,
+    /// Keyed by program and pad.
+    sound_undo: Option<Vec<((usize, usize), program::Pad)>>,
     /// The sequence or track name being typed in their window.
     name_buf: String,
     copy_to: usize,
@@ -193,7 +195,7 @@ impl App {
             let mut s = audio::lock(&engine.shared);
             let rate = s.rate;
             for (pad, sound) in audio::builtin_kit(rate).into_iter().enumerate() {
-                s.pads[pad].sound = Some(sound);
+                s.programs[0].pads[pad].sound = Some(sound);
             }
         }
         let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("/"));
@@ -213,7 +215,7 @@ impl App {
             pad: 0,
             step: 0,
             song_step: 0,
-            mpc_notes: None,
+            mpc_notes: Vec::new(),
             var_pad: 0,
             var_param: program::VarParam::Tune,
             var_value: 64,
@@ -554,6 +556,27 @@ impl App {
                 let by = if fine { d } else { d * 10 };
                 return self.edit_ratio = (self.edit_ratio as i32 + by).clamp(500, 2000) as u32;
             }
+            Field::Bus => {
+                return self.with(|s| {
+                    let tr = s.t.track;
+                    let bus = &mut s.seq_mut().tracks[tr].bus;
+                    *bus = (*bus as i32 + d).clamp(0, program::DRUMS as i32) as u8;
+                });
+            }
+            // Chooses the program of the selected track's DRUM bus.
+            Field::Pgm => {
+                let msg = self.with(|s| {
+                    let bus = s.seq().tracks[s.t.track].bus;
+                    let Some(drum) = bus.checked_sub(1) else { return Some("A MIDI track plays no program") };
+                    let d0 = &mut s.drums[drum as usize];
+                    *d0 = (*d0 as i32 + d).clamp(0, s.programs.len() as i32 - 1) as usize;
+                    None
+                });
+                if let Some(msg) = msg {
+                    self.say(msg);
+                }
+                return;
+            }
             Field::CopyTo => {
                 let max = if matches!(self.screen, Screen::SeqWin) { seq::SEQUENCES } else { seq::TRACKS };
                 return self.copy_to = (self.copy_to as i32 + d).clamp(0, max as i32 - 1) as usize;
@@ -631,7 +654,8 @@ impl App {
         }
         self.with(|s| {
             let grid = s.grid();
-            let p = &mut s.pads[pad];
+            let prog = s.program();
+            let p = &mut s.programs[prog].pads[pad];
             match field {
                 Field::Seq => s.select_seq(step(s.t.seq as u32, 0, seq::SEQUENCES as u32 - 1) as usize),
                 Field::Tempo => {
@@ -797,7 +821,9 @@ impl App {
                 | Field::LevelsKey
                 | Field::OutPort
                 | Field::EditRatio
-                | Field::CopyTo => {}
+                | Field::CopyTo
+                | Field::Bus
+                | Field::Pgm => {}
             }
         });
     }
@@ -902,7 +928,7 @@ impl App {
 
     /// Splits the selected pad's sound into fresh zones when the pad or its length changed.
     fn sync_zones(&mut self) {
-        let len = self.with(|s| s.pads[self.pad].sound.as_ref().map_or(0, |snd| snd.frames.len()));
+        let len = self.with(|s| s.pads_mut()[self.pad].sound.as_ref().map_or(0, |snd| snd.frames.len()));
         if self.zones_pad != self.pad || self.zones.last() != Some(&len) {
             self.zones = edit::zones(len, self.zones.len().saturating_sub(1).max(1));
             (self.zones_pad, self.zone) = (self.pad, 0);
@@ -920,8 +946,12 @@ impl App {
             return self.with(|s| s.undo());
         }
         let Some(before) = self.sound_undo.take() else { return };
-        let after =
-            self.with(|s| before.into_iter().map(|(p, pad)| (p, std::mem::replace(&mut s.pads[p], pad))).collect());
+        let after = self.with(|s| {
+            before
+                .into_iter()
+                .map(|((prog, p), pad)| ((prog, p), std::mem::replace(&mut s.programs[prog].pads[p], pad)))
+                .collect()
+        });
         self.sound_undo = Some(after);
         self.say("Sound edit undone (UNDO SEQ again redoes it)");
     }
@@ -930,14 +960,14 @@ impl App {
     /// audio lock, so playback carries on meanwhile.
     fn time_stretch(&mut self, range: std::ops::Range<usize>, ratio: u32, from: Section) {
         let (pad, to) = (self.pad, self.edit_to);
-        let Some((snd, rate)) = self.with(|s| s.pads[pad].sound.clone().map(|snd| (snd, s.rate))) else {
+        let Some((snd, rate)) = self.with(|s| s.pads_mut()[pad].sound.clone().map(|snd| (snd, s.rate))) else {
             return self.say("No sound on this pad");
         };
         let name = format!("{}-T", snd.name.chars().take(13).collect::<String>());
         let part = edit::section(&snd, range, name);
         let frames = edit::stretch(&part.frames, ratio as f64 / 1000.0, rate);
         let sound = Sound::new(part.name, frames.into());
-        self.with(|s| s.pads[to] = program::Pad { sound: Some(sound), ..program::Pad::default() });
+        self.with(|s| s.pads_mut()[to] = program::Pad { sound: Some(sound), ..program::Pad::default() });
         self.set_screen(from.screen());
         self.say(format!("Stretched to {:.1}% on {}", ratio as f32 / 10.0, program::pad_name(to)));
     }
@@ -945,7 +975,7 @@ impl App {
     /// The part of the selected pad's sound EDIT works on.
     fn section(&self, section: Section) -> std::ops::Range<usize> {
         self.with(|s| {
-            let Some(snd) = &s.pads[self.pad].sound else { return 0..0 };
+            let Some(snd) = &s.pads_mut()[self.pad].sound else { return 0..0 };
             match section {
                 Section::Trim => snd.start..snd.end,
                 Section::Loop => snd.loop_to.min(snd.end)..snd.end,
@@ -963,7 +993,10 @@ impl App {
             edit::Op::NewSound | edit::Op::TimeStretch => to..to + 1,
             _ => pad..pad + 1,
         };
-        self.sound_undo = Some(self.with(|s| changes.map(|p| (p, s.pads[p].clone())).collect()));
+        self.sound_undo = Some(self.with(|s| {
+            let prog = s.program();
+            changes.map(|p| ((prog, p), s.programs[prog].pads[p].clone())).collect()
+        }));
         let range = self.section(from);
         let ranges = if op == edit::Op::Slice {
             self.zones.windows(2).map(|w| w[0]..w[1]).collect()
@@ -975,10 +1008,10 @@ impl App {
         }
         if op == edit::Op::Insert {
             let msg = self.with(|s| {
-                let Some(other) = s.pads[to].sound.as_ref().map(|o| o.frames.clone()) else {
+                let Some(other) = s.pads_mut()[to].sound.as_ref().map(|o| o.frames.clone()) else {
                     return "That pad has no sound".to_owned();
                 };
-                match &mut s.pads[pad].sound {
+                match &mut s.pads_mut()[pad].sound {
                     Some(snd) => {
                         edit::insert(snd, range.start, &other);
                         format!("Inserted the sound of {}", program::pad_name(to))
@@ -990,9 +1023,9 @@ impl App {
             return self.say(msg);
         }
         let msg = self.with(|s| {
-            let Some(snd) = s.pads[pad].sound.clone() else { return "No sound on this pad".to_owned() };
+            let Some(snd) = s.pads_mut()[pad].sound.clone() else { return "No sound on this pad".to_owned() };
             if !op.makes_sounds() {
-                if let Some(snd) = &mut s.pads[pad].sound {
+                if let Some(snd) = &mut s.pads_mut()[pad].sound {
                     edit::apply(snd, op, range);
                 }
                 return format!("{} done", op.label());
@@ -1004,7 +1037,7 @@ impl App {
             let base: String = snd.name.chars().take(13).collect();
             for (i, r) in ranges.iter().enumerate() {
                 let name = format!("{base}-{}", i + 1);
-                let target = &mut s.pads[to + i];
+                let target = &mut s.pads_mut()[to + i];
                 *target = program::Pad { sound: Some(edit::section(&snd, r.clone(), name)), ..program::Pad::default() };
             }
             let last = program::pad_name(to + ranges.len() - 1);
@@ -1061,10 +1094,10 @@ impl App {
             Ok((sound, _)) if sound.frames.is_empty() => self.say("Empty file"),
             Ok((sound, tune)) => {
                 self.with(|s| {
-                    s.pads[pad].sound = Some(sound);
+                    s.pads_mut()[pad].sound = Some(sound);
                     // An MPC sound's own tuning carries over to the pad.
                     if is_snd {
-                        s.pads[pad].tune = tune;
+                        s.pads_mut()[pad].tune = tune;
                     }
                     s.hits.push(Hit::Press { pad: pad as u8, velocity: KEY_VELOCITY, var: None });
                 });
@@ -1117,24 +1150,22 @@ impl App {
             Err(e) => return self.say(e),
         };
         let mut program = String::new();
-        if self.mpc_notes.is_none()
+        if self.mpc_notes.iter().all(Option::is_none)
             && let Some(aps) = sibling(&path, "aps")
         {
             let rate = self.with(|s| s.rate);
             match pgm::load(&aps, rate) {
-                Ok(pgm::Loaded { name, pads, note_pads, .. }) => {
-                    self.with(|s| s.pads = pads);
-                    self.mpc_notes = Some(note_pads);
-                    program = format!(" with program {name}");
-                }
+                Ok(loaded) => program = format!(" with {}", self.take_programs(loaded, true)),
                 Err(e) => return self.say(e),
             }
         }
-        // Without the MPC's program, drum notes 35–98 go to pads A01–D16 in order.
-        let map = self.mpc_notes;
-        let pad_of = move |note: u8| {
+        // Each track's notes go through the program of its DRUM bus. Without the MPC's program,
+        // drum notes 35–98 go to pads A01–D16 in order.
+        let (drums, maps) = (self.with(|s| s.drums), self.mpc_notes.clone());
+        let pad_of = |track: usize, note: u8, bus: u8| {
             let n = (note as usize).checked_sub(35).filter(|n| *n < PADS)?;
-            map.map_or(Some(n as u8), |m| m[n])
+            let map = bus.checked_sub(1).and_then(|b| maps.get(drums[b as usize]).copied().flatten());
+            map.map_or(Some(n as u8), |m| m[n]).filter(|_| track < seq::TRACKS)
         };
         let (mut dropped, count) = (0, all.seqs.len());
         let first = all.seqs.first().map_or(0, |s| s.index);
@@ -1143,7 +1174,7 @@ impl App {
             s.t.rec = RecMode::Off;
             s.seqs = (0..seq::SEQUENCES).map(|_| seq::Sequence::default()).collect();
             for a in &all.seqs {
-                let (seq, d) = a.to_sequence(pad_of);
+                let (seq, d) = a.to_sequence(|track, note| pad_of(track, note, a.buses[track]));
                 s.seqs[a.index] = seq;
                 dropped += d;
             }
@@ -1173,7 +1204,8 @@ impl App {
         };
         // Files saved by an MPC use its drum notes; with an MPC program loaded, they go to the
         // program's pads. Otherwise notes 36–99 are pads A01–D16, as for MIDI input.
-        let mpc = self.mpc_notes;
+        let mpc = self.with(|s| s.program());
+        let mpc = self.mpc_notes.get(mpc).copied().flatten();
         let pad_of = move |note: u8| match mpc {
             Some(map) => (note as usize).checked_sub(35).and_then(|n| map.get(n).copied().flatten()),
             None => note.checked_sub(midi::FIRST_NOTE).filter(|p| (*p as usize) < PADS),
@@ -1247,18 +1279,56 @@ impl App {
         }
         self.confirm = None;
         let rate = self.with(|s| s.rate);
+        let aps = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("aps"));
         match pgm::load(&path, rate) {
-            Ok(pgm::Loaded { name, pads, missing, note_pads }) => {
-                self.with(|s| s.pads = pads);
-                self.mpc_notes = Some(note_pads);
+            Ok(loaded) => {
+                let missing = loaded.missing.join(" ");
+                let names = self.take_programs(loaded, aps);
                 if missing.is_empty() {
-                    self.say(format!("Loaded program {name}"));
+                    self.say(format!("Loaded {names}"));
                 } else {
-                    self.say(format!("{name}: missing {}", missing.join(" ")));
+                    self.say(format!("{names}: missing {missing}"));
                 }
             }
             Err(e) => self.say(e),
         }
+    }
+
+    /// Puts loaded MPC programs in place: all of an `.APS` (`replace_all`), replacing every
+    /// program and the DRUM assignments; or one `.PGM` into the current program. Returns what
+    /// was loaded, for the message.
+    fn take_programs(&mut self, loaded: pgm::Loaded, replace_all: bool) -> String {
+        let pgm::Loaded { programs, drums, .. } = loaded;
+        let count = programs.len().min(program::PROGRAMS);
+        let names = if count == 1 { format!("program {}", programs[0].name) } else { format!("{count} programs") };
+        let maps: Vec<_> = programs.iter().map(|p| Some(p.note_pads)).collect();
+        let current = self.with(|s| {
+            let into = program::Program::new;
+            if replace_all {
+                s.programs = programs
+                    .into_iter()
+                    .take(program::PROGRAMS)
+                    .map(|p| program::Program { pads: p.pads, ..into(p.name) })
+                    .collect();
+                s.drums = drums.unwrap_or_default().map(|d| d.min(count - 1));
+                None
+            } else {
+                let p = s.program();
+                let loaded = programs.into_iter().next().map(|l| program::Program { pads: l.pads, ..into(l.name) });
+                if let Some(l) = loaded {
+                    s.programs[p] = l;
+                }
+                Some(p)
+            }
+        });
+        match current {
+            None => self.mpc_notes = maps.into_iter().take(count).collect(),
+            Some(p) => {
+                self.mpc_notes.resize(p + 1, None);
+                self.mpc_notes[p] = maps.into_iter().next().flatten();
+            }
+        }
+        names
     }
 
     /// Loading replaces everything, so it takes a second ENTER to confirm.
@@ -1282,6 +1352,8 @@ impl App {
                 if port != self.midi_out.port {
                     self.open_out_port(&port);
                 }
+                // The MPC note maps belonged to the programs just replaced.
+                self.mpc_notes.clear();
                 self.project = Some(path);
                 self.title_changed = true;
                 (self.pad, self.bank, self.focus) = (0, 0, 0);
@@ -1388,11 +1460,17 @@ impl App {
     }
 
     fn in_window(&self) -> bool {
-        matches!(self.screen, Screen::SeqWin | Screen::TrWin)
+        matches!(self.screen, Screen::SeqWin | Screen::TrWin | Screen::PgmWin)
     }
 
     fn commit_name(&mut self) {
         let name = self.name_buf.trim().to_owned();
+        if matches!(self.screen, Screen::PgmWin) {
+            return self.with(|s| {
+                let p = s.program();
+                s.programs[p].name = name;
+            });
+        }
         let seq_win = matches!(self.screen, Screen::SeqWin);
         self.with(|s| {
             let (cur, tr) = (s.t.seq, s.t.track);
@@ -1422,12 +1500,63 @@ impl App {
                 self.copy_to = self.with(|s| (s.t.seq + 1) % seq::SEQUENCES);
                 self.set_screen(Screen::SeqWin);
             }
-            Some(Field::Track | Field::TrackOn | Field::TrackOut) => {
+            Some(Field::Pgm) => self.set_screen(Screen::PgmWin),
+            Some(Field::Track | Field::TrackOn | Field::TrackOut | Field::Bus) => {
                 self.copy_to = self.with(|s| (s.t.track + 1) % seq::TRACKS);
                 self.set_screen(Screen::TrWin);
             }
             _ => self.say("No window for this field"),
         }
+    }
+
+    /// The program window's NEW (1), COPY (2) and DELETE (3). NEW and COPY put the new program
+    /// on the selected track's DRUM bus.
+    fn program_edit(&mut self, key: usize) {
+        let notes = self.mpc_notes.clone();
+        let (msg, maps) = self.with(|s| {
+            let p = s.program();
+            let n = s.programs.len();
+            let drum = s.seq().tracks[s.t.track].bus.saturating_sub(1) as usize;
+            // The MPC note maps follow the programs.
+            let mut maps = notes;
+            maps.resize(n, None);
+            match key {
+                1 | 2 if n >= program::PROGRAMS => ("24 programs is the most".to_owned(), maps),
+                1 | 2 => {
+                    let new = if key == 1 {
+                        maps.push(None);
+                        program::Program::new(format!("NewPgm-{}", (b'A' + (n % 26) as u8) as char))
+                    } else {
+                        maps.push(maps[p]);
+                        let mut copy = s.programs[p].clone();
+                        copy.name = format!("{}-C", copy.name.chars().take(14).collect::<String>());
+                        copy
+                    };
+                    s.programs.push(new);
+                    s.drums[drum] = n;
+                    (format!("Program {:02} on DRUM{}", n + 1, drum + 1), maps)
+                }
+                _ if n == 1 => ("The last program stays".to_owned(), maps),
+                _ => {
+                    s.stop();
+                    s.programs.remove(p);
+                    maps.remove(p);
+                    // The DRUM buses keep pointing at the same programs.
+                    for d in &mut s.drums {
+                        *d = if *d == p {
+                            0
+                        } else if *d > p {
+                            *d - 1
+                        } else {
+                            *d
+                        };
+                    }
+                    (format!("Program {:02} deleted", p + 1), maps)
+                }
+            }
+        });
+        self.mpc_notes = maps;
+        self.say(msg);
     }
 
     /// COPY and DELETE in the SEQUENCE and TRACK windows; UNDO SEQ takes them back.
@@ -1535,6 +1664,12 @@ impl App {
                 (self.editing_name, self.replace_name) = (true, true);
             }
             (Screen::SeqWin | Screen::TrWin, 5) => self.set_screen(Screen::Main),
+            (Screen::PgmWin, 1..=3) => self.program_edit(i),
+            (Screen::PgmWin, 4) => {
+                self.name_buf = self.with(|s| s.programs[s.program()].name.clone());
+                (self.editing_name, self.replace_name) = (true, true);
+            }
+            (Screen::PgmWin, 5) => self.set_screen(Screen::Program),
             (Screen::TrMute { .. }, 5) => {
                 if self.with(|s| s.t.solo.take().is_none()) {
                     self.screen = Screen::TrMute { solo: true };
@@ -1552,7 +1687,7 @@ impl App {
             (Screen::Program, 3) => self.set_screen(Screen::Velo),
             (Screen::Velo, 0) => self.set_screen(Screen::Program),
             (Screen::Program, 5) => {
-                self.with(|s| s.pads[pad].sound = None);
+                self.with(|s| s.pads_mut()[pad].sound = None);
                 self.say("Sound removed");
             }
             (Screen::Sample, 4 | 5) => self.sample_key(i),
@@ -1577,17 +1712,20 @@ impl App {
                 });
                 self.song_step = sel.min(left.saturating_sub(1));
             }
-            (Screen::Mixer, 5) => self.with(|s| (s.pads[pad].level, s.pads[pad].pan) = (100, 0)),
+            (Screen::Mixer, 5) => self.with(|s| {
+                let p = &mut s.pads_mut()[pad];
+                (p.level, p.pan) = (100, 0);
+            }),
             (Screen::Trim | Screen::Loop | Screen::Zone, 0) => self.set_screen(Screen::Trim),
             (Screen::Trim | Screen::Loop | Screen::Zone, 1) => self.set_screen(Screen::Loop),
             (Screen::Trim | Screen::Loop | Screen::Zone, 2) => self.set_screen(Screen::Zone),
             (Screen::Trim, 3) => self.with(|s| {
-                if let Some(snd) = &mut s.pads[pad].sound {
+                if let Some(snd) = &mut s.pads_mut()[pad].sound {
                     (snd.start, snd.end) = (0, snd.frames.len());
                 }
             }),
             (Screen::Loop, 3) => self.with(|s| {
-                if let Some(snd) = &mut s.pads[pad].sound {
+                if let Some(snd) = &mut s.pads_mut()[pad].sound {
                     (snd.loop_to, snd.looping) = (snd.start, false);
                 }
             }),
@@ -1641,7 +1779,7 @@ impl App {
         let rate = self.with(|s| s.rate);
         let frames: program::Frames = audio::resample(frames, from, rate).into();
         self.with(|s| {
-            s.pads[pad].sound = Some(Sound::new(name.clone(), frames));
+            s.pads_mut()[pad].sound = Some(Sound::new(name.clone(), frames));
             s.hits.push(Hit::Press { pad: pad as u8, velocity: KEY_VELOCITY, var: None });
         });
         self.say(format!("Kept {name} on {}", program::pad_name(pad)));
@@ -2062,7 +2200,7 @@ impl App {
             Screen::Trim | Screen::Loop | Screen::Zone => {
                 let range = match &self.screen {
                     Screen::Zone => self.zones[self.zone]..self.zones[self.zone + 1],
-                    _ => st.pads[self.pad].sound.as_ref().map_or(0..0, |snd| match self.screen {
+                    _ => st.pads()[self.pad].sound.as_ref().map_or(0..0, |snd| match self.screen {
                         Screen::Loop => snd.loop_to..snd.end,
                         _ => snd.start..snd.end,
                     }),
@@ -2110,7 +2248,7 @@ impl App {
         let bank = self.pad / 16 * 16;
         let w = (LCD_W - 6.0) / 16.0;
         for i in 0..16 {
-            let pad = &st.pads[bank + i];
+            let pad = &st.pads()[bank + i];
             let x = LCD_X + 3.0 + i as f32 * w;
             let selected = bank + i == self.pad;
             // Pan marker over the strip, level bar below it.
@@ -2454,7 +2592,7 @@ fn frame_step(len: usize, fine: bool) -> i64 {
 
 /// TRIM, LOOP and ZONE waveform: `range` drawn dark, the rest faded, a line at each mark.
 fn wave(st: &Shared, pad: usize, painter: &egui::Painter, p: &Panel, range: std::ops::Range<usize>, marks: &[usize]) {
-    let Some(snd) = &st.pads[pad].sound else { return };
+    let Some(snd) = &st.pads()[pad].sound else { return };
     let s = p.scale;
     let (top, height) = (80.0, 48.0);
     let mid = top + height / 2.0;

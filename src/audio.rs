@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard, mpsc};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-use crate::program::{Frames, Overlap, PADS, Pad, Sound, Variation, Velo};
+use crate::program::{DRUMS, Frames, Overlap, PADS, Pad, Program, Sound, Variation, Velo};
 use crate::seq::{Note, SEQUENCES, Sequence, TIMING, quantize};
 
 const MAX_VOICES: usize = 64;
@@ -30,6 +30,10 @@ pub enum Hit {
     },
     /// Stops PLAY X and LOAD's PLAY.
     StopAudition,
+    /// Ends a sequence note still sounding when playback stops.
+    Off {
+        key: u16,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -68,7 +72,7 @@ pub struct Transport {
     /// mode cannot erase them.
     pending: Vec<(Note, Option<u32>)>,
     /// Pads playing NOTE OFF notes from the sequence, and the tick to release them.
-    note_offs: Vec<(u8, u32)>,
+    note_offs: Vec<(u16, u32)>,
     pub undo: Option<(usize, Sequence)>,
     /// Playing the song: the step, and how many times it has repeated so far.
     pub song: Option<(usize, u32)>,
@@ -153,7 +157,9 @@ pub struct Song {
 }
 
 pub struct Shared {
-    pub pads: Vec<Pad>,
+    pub programs: Vec<Program>,
+    /// The program each DRUM bus plays.
+    pub drums: [usize; DRUMS],
     pub seqs: Vec<Sequence>,
     pub song: Song,
     pub t: Transport,
@@ -175,7 +181,8 @@ pub struct Shared {
 impl Shared {
     fn new(rate: u32) -> Self {
         Self {
-            pads: (0..PADS).map(|_| Pad::default()).collect(),
+            programs: vec![Program::new("NewPgm-A")],
+            drums: [0; DRUMS],
             seqs: (0..SEQUENCES).map(|_| Sequence::default()).collect(),
             song: Song::default(),
             t: Transport {
@@ -215,6 +222,27 @@ impl Shared {
             preview: None,
             out_port: crate::midi::OUT_OFF.to_owned(),
         }
+    }
+
+    /// The program a track plays, or `None` for a MIDI track.
+    pub fn program_of(&self, track: &crate::seq::Track) -> Option<usize> {
+        let bus = track.bus.checked_sub(1)? as usize;
+        Some(self.drums[bus.min(DRUMS - 1)].min(self.programs.len() - 1))
+    }
+
+    /// The program the pads play and the PROGRAM, MIXER and TRIM screens edit: the selected
+    /// track's, or DRUM1's when the track is a MIDI track.
+    pub fn program(&self) -> usize {
+        self.program_of(&self.seq().tracks[self.t.track]).unwrap_or(self.drums[0].min(self.programs.len() - 1))
+    }
+
+    pub fn pads(&self) -> &[Pad] {
+        &self.programs[self.program()].pads
+    }
+
+    pub fn pads_mut(&mut self) -> &mut [Pad] {
+        let p = self.program();
+        &mut self.programs[p].pads
     }
 
     pub fn seq(&self) -> &Sequence {
@@ -297,8 +325,8 @@ impl Shared {
             return;
         }
         self.commit_pending();
-        for (pad, _) in self.t.note_offs.drain(..) {
-            self.hits.push(Hit::Release { pad });
+        for (key, _) in self.t.note_offs.drain(..) {
+            self.hits.push(Hit::Off { key });
         }
         for (status, note, _) in std::mem::take(&mut self.t.midi_offs) {
             self.send([status, note, 0]);
@@ -419,8 +447,8 @@ impl Shared {
         let mut i = 0;
         while i < self.t.note_offs.len() {
             if self.t.note_offs[i].1 == tick {
-                let (pad, _) = self.t.note_offs.swap_remove(i);
-                voices.release(pad);
+                let (key, _) = self.t.note_offs.swap_remove(i);
+                voices.release(key);
             } else {
                 i += 1;
             }
@@ -432,7 +460,9 @@ impl Shared {
         if self.t.repeat && tick.is_multiple_of(grid) {
             for pad in 0..PADS {
                 if let Some((velocity, var)) = self.t.held[pad] {
-                    voices.trigger(&self.pads, pad as u8, velocity, var);
+                    if let Some(p) = self.program_of(&self.seq().tracks[self.t.track]) {
+                        voices.trigger(&self.programs[p].pads, p, pad as u8, velocity, var);
+                    }
                     if recording {
                         let note = Note { tick, pad: pad as u8, velocity, duration: grid / 2, var };
                         self.t.pending.push((note, None));
@@ -459,9 +489,14 @@ impl Shared {
                         let _ = out.send([0x90 | ch, note, n.velocity]);
                         self.t.midi_offs.push((0x80 | ch, note, (tick + n.duration.max(1)) % len));
                     }
-                    voices.trigger(&self.pads, n.pad, n.velocity, n.var);
-                    if self.pads[n.pad as usize].note_off() {
-                        self.t.note_offs.push((n.pad, (tick + n.duration) % len));
+                    // MIDI tracks only send their notes out.
+                    let Some(p) = t.bus.checked_sub(1).map(|b| self.drums[b as usize].min(self.programs.len() - 1))
+                    else {
+                        continue;
+                    };
+                    voices.trigger(&self.programs[p].pads, p, n.pad, n.velocity, n.var);
+                    if self.programs[p].pads[n.pad as usize].note_off() {
+                        self.t.note_offs.push((key(p, n.pad), (tick + n.duration) % len));
                     }
                 }
             }
@@ -598,7 +633,9 @@ impl Shared {
                     self.t.erasing[pad as usize] = true;
                     return;
                 }
-                voices.trigger(&self.pads, pad, velocity, var);
+                if let Some(p) = self.program_of(&self.seq().tracks[self.t.track]) {
+                    voices.trigger(&self.programs[p].pads, p, pad, velocity, var);
+                }
                 if let Some(ch) = self.thru() {
                     self.send([0x90 | ch, pad + crate::midi::FIRST_NOTE, velocity]);
                 }
@@ -610,11 +647,12 @@ impl Shared {
                 }
             }
             Hit::Audition { pad, range } => {
-                if let Some(sound) = &self.pads[pad as usize].sound {
+                if let Some(sound) = &self.pads()[pad as usize].sound {
                     voices.audition(sound, range);
                 }
             }
             Hit::StopAudition => voices.cut(AUDITION),
+            Hit::Off { key } => voices.release(key),
             Hit::Release { pad } => {
                 self.t.held[pad as usize] = None;
                 self.t.erasing[pad as usize] = false;
@@ -623,10 +661,11 @@ impl Shared {
                 }
                 // Only NOTE OFF sounds stop when the pad is let go; the others play out.
                 // With SIMULT or VEL SW the hit may be sounding on the other pads too.
-                let also = self.pads[pad as usize].also;
-                for target in std::iter::once(pad).chain(also.into_iter().flatten()) {
-                    if self.pads.get(target as usize).is_some_and(Pad::note_off) {
-                        voices.release(target);
+                let p = self.program();
+                let pads = &self.programs[p].pads;
+                for target in std::iter::once(pad).chain(pads[pad as usize].also.into_iter().flatten()) {
+                    if pads.get(target as usize).is_some_and(Pad::note_off) {
+                        voices.release(key(p, target));
                     }
                 }
                 let len = self.seq().len();
@@ -761,7 +800,7 @@ impl Svf {
 }
 
 struct Voice {
-    pad: u8,
+    key: u16,
     frames: Frames,
     pos: f64,
     end: f64,
@@ -803,7 +842,13 @@ const SWEEP_STEP: u32 = 32;
 
 const CUT_FRAMES: u32 = 128;
 /// Voice owner for PLAY X, which is no pad.
-const AUDITION: u8 = u8::MAX - 1;
+const AUDITION: u16 = u16::MAX - 1;
+
+/// What a voice belongs to: a pad of a program, so pads of different programs never cut or
+/// release each other.
+fn key(program: usize, pad: u8) -> u16 {
+    (program * PADS + pad as usize) as u16
+}
 
 impl Voice {
     fn level(&mut self) -> f32 {
@@ -888,41 +933,43 @@ impl Voices {
         Self { voices: Vec::with_capacity(MAX_VOICES + 8), rate, clicks: [click(1000.0), click(1600.0)] }
     }
 
-    fn cut(&mut self, pad: u8) {
-        for v in self.voices.iter_mut().filter(|v| v.pad == pad && v.cut.is_none()) {
+    fn cut(&mut self, key: u16) {
+        for v in self.voices.iter_mut().filter(|v| v.key == key && v.cut.is_none()) {
             v.cut = Some(CUT_FRAMES);
         }
     }
 
-    fn release(&mut self, pad: u8) {
-        for v in self.voices.iter_mut().filter(|v| v.pad == pad && v.release.is_none()) {
+    fn release(&mut self, key: u16) {
+        for v in self.voices.iter_mut().filter(|v| v.key == key && v.release.is_none()) {
             let level = if v.attack > 0 { (v.age as f32 / v.attack as f32).min(1.0) } else { 1.0 };
             v.release = Some((level, v.release_len, 0));
         }
     }
 
-    fn trigger(&mut self, pads: &[Pad], pad: u8, velocity: u8, var: Variation) {
+    /// Plays `pad` of program number `program`, whose pads are `pads`.
+    fn trigger(&mut self, pads: &[Pad], program: usize, pad: u8, velocity: u8, var: Variation) {
         for target in pads[pad as usize].targets(pad, velocity) {
             // The NOTE VARIATION belongs to the pad that was hit.
-            self.play(pads, target, velocity, if target == pad { var } else { None });
+            self.play(pads, program, target, velocity, if target == pad { var } else { None });
         }
     }
 
-    fn play(&mut self, pads: &[Pad], pad: u8, velocity: u8, var: Variation) {
+    fn play(&mut self, pads: &[Pad], program: usize, pad: u8, velocity: u8, var: Variation) {
         let Some(p) = pads.get(pad as usize) else { return };
         let Some(sound) = &p.sound else { return };
+        // Mute assigns work within the program.
         for m in p.mutes.iter().flatten() {
-            self.cut(*m);
+            self.cut(key(program, *m));
         }
         if p.overlap != Overlap::Poly || p.note_off() {
-            self.cut(pad);
+            self.cut(key(program, pad));
         }
         if self.voices.len() >= MAX_VOICES
             && let Some(oldest) = self.voices.iter_mut().find(|v| v.cut.is_none())
         {
             oldest.cut = Some(CUT_FRAMES);
         }
-        self.voices.push(voice(&p.varied(var), sound, pad, velocity, self.rate));
+        self.voices.push(voice(&p.varied(var), sound, key(program, pad), velocity, self.rate));
     }
 
     fn audition(&mut self, sound: &Sound, range: std::ops::Range<usize>) {
@@ -937,7 +984,7 @@ impl Voices {
         let frames = self.clicks[accent as usize].clone();
         let end = frames.len() as f64;
         self.voices.push(Voice {
-            pad: u8::MAX,
+            key: u16::MAX,
             frames,
             pos: 0.0,
             end,
@@ -968,7 +1015,7 @@ impl Voices {
     }
 }
 
-fn voice(p: &Pad, sound: &Sound, pad: u8, velocity: u8, rate: u32) -> Voice {
+fn voice(p: &Pad, sound: &Sound, key: u16, velocity: u8, rate: u32) -> Voice {
     let r = rate as f32;
     let end = sound.end.min(sound.frames.len()) as f64;
     // VELOCITY MODULATION, with the MPC's numbers: softer hits start up to (v² + 1) / 2 ms later,
@@ -1003,7 +1050,7 @@ fn voice(p: &Pad, sound: &Sound, pad: u8, velocity: u8, rate: u32) -> Voice {
         rate: r,
     });
     Voice {
-        pad,
+        key,
         frames: sound.frames.clone(),
         pos: start,
         end,
@@ -1025,7 +1072,7 @@ fn voice(p: &Pad, sound: &Sound, pad: u8, velocity: u8, rate: u32) -> Voice {
 /// A copy of what [`render`] needs, taken quickly so the audio lock is not held while rendering.
 pub fn bounce(live: &Shared, song: bool) -> Shared {
     let mut s = Shared::new(live.rate);
-    s.pads = live.pads.clone();
+    (s.programs, s.drums) = (live.programs.clone(), live.drums);
     s.seqs = live.seqs.clone();
     s.master = live.master;
     (s.t.seq, s.t.solo, s.t.second) = (live.t.seq, live.t.solo, live.t.second);
@@ -1058,8 +1105,8 @@ pub fn render(mut s: Shared) -> Vec<[f32; 2]> {
         mix(&mut s, &mut v, &mut out);
     }
     // Held notes end with the sequence; the rest ring out, for at most ten seconds.
-    for (pad, _) in std::mem::take(&mut s.t.note_offs) {
-        v.release(pad);
+    for (key, _) in std::mem::take(&mut s.t.note_offs) {
+        v.release(key);
     }
     for _ in 0..rate as usize * 10 {
         if v.voices.is_empty() {
@@ -1184,7 +1231,7 @@ mod tests {
     fn with_kit(rate: u32) -> (Shared, Voices) {
         let (mut s, v) = (offline_shared(rate), Voices::new(rate));
         for (pad, sound) in builtin_kit(rate).into_iter().enumerate() {
-            s.pads[pad].sound = Some(sound);
+            s.programs[0].pads[pad].sound = Some(sound);
         }
         (s, v)
     }
@@ -1369,7 +1416,7 @@ mod tests {
         s.hits.push(Hit::Press { pad: 2, velocity: 100, var });
         run(&mut s, &mut v, 1);
         // An octave up plays the hi-hat at double speed.
-        assert!(v.voices.iter().any(|v| v.pad == 2 && (v.rate - 2.0).abs() < 0.01));
+        assert!(v.voices.iter().any(|v| v.key == 2 && (v.rate - 2.0).abs() < 0.01));
         s.hits.push(Hit::Release { pad: 2 });
         run(&mut s, &mut v, 1);
         s.stop();
@@ -1434,15 +1481,15 @@ mod tests {
     #[test]
     fn mono_and_mute_assign_cut_voices() {
         let (mut s, mut v) = with_kit(48_000);
-        s.pads[0].overlap = Overlap::Mono;
-        s.pads[1].mutes = [Some(2), None];
+        s.programs[0].pads[0].overlap = Overlap::Mono;
+        s.programs[0].pads[1].mutes = [Some(2), None];
         for pad in [0, 0, 2, 1] {
             s.hits.push(Hit::Press { pad, velocity: 100, var: None });
         }
         run(&mut s, &mut v, 1);
         // Pad 0's first hit and pad 2 are fading out; pad 0's second hit and pad 1 play on.
         run(&mut s, &mut v, CUT_FRAMES as usize + 2);
-        let mut pads: Vec<u8> = v.voices.iter().map(|v| v.pad).collect();
+        let mut pads: Vec<u16> = v.voices.iter().map(|v| v.key).collect();
         pads.sort();
         assert_eq!(pads, [0, 1]);
     }
@@ -1450,8 +1497,8 @@ mod tests {
     #[test]
     fn note_off_stops_on_release() {
         let (mut s, mut v) = with_kit(48_000);
-        s.pads[0].overlap = Overlap::NoteOff;
-        s.pads[0].decay = 0;
+        s.programs[0].pads[0].overlap = Overlap::NoteOff;
+        s.programs[0].pads[0].decay = 0;
         s.hits.push(Hit::Press { pad: 0, velocity: 100, var: None });
         run(&mut s, &mut v, 100);
         s.hits.push(Hit::Release { pad: 0 });
@@ -1473,7 +1520,7 @@ mod tests {
     fn a_loop_holds_until_release_and_play_x_plays_once() {
         let (mut s, mut v) = with_kit(48_000);
         let len = {
-            let snd = s.pads[0].sound.as_mut().unwrap();
+            let snd = s.programs[0].pads[0].sound.as_mut().unwrap();
             (snd.loop_to, snd.looping) = (snd.end / 2, true);
             snd.end
         };
@@ -1517,10 +1564,10 @@ mod tests {
         let (soft, hard) = (peak(&mut s, &mut v, 32), peak(&mut s, &mut v, 127));
         assert!((soft / hard - 32.0 / 127.0).abs() < 0.02);
         // Velo→Level 0: every hit at full level.
-        s.pads[0].velo.level = 0;
+        s.programs[0].pads[0].velo.level = 0;
         assert!((peak(&mut s, &mut v, 32) - hard).abs() < 1e-3);
         // Velo→Start 100: the softest hit starts (100² + 1) / 2 ms = 5 s in, past the kick's end.
-        s.pads[0].velo.start = 100;
+        s.programs[0].pads[0].velo.start = 100;
         s.hits.push(Hit::Press { pad: 0, velocity: 1, var: None });
         run(&mut s, &mut v, 1);
         assert!(v.voices.is_empty() || v.voices[0].pos >= v.voices[0].end - 2.0);
@@ -1533,8 +1580,9 @@ mod tests {
         // Steady noise, so only the filter changes the level.
         let noise: Vec<[f32; 2]> =
             (0..rate as usize).map(|i| ((i * 7919 % 1000) as f32 / 500.0 - 1.0) * 0.5).map(|x| [x, x]).collect();
-        s.pads[0].sound = Some(Sound::new("NOISE", noise.into()));
-        (s.pads[0].cutoff, s.pads[0].fenv) = (20, crate::program::FilterEnv { attack: 10, decay: 20, amount: 70 });
+        s.programs[0].pads[0].sound = Some(Sound::new("NOISE", noise.into()));
+        (s.programs[0].pads[0].cutoff, s.programs[0].pads[0].fenv) =
+            (20, crate::program::FilterEnv { attack: 10, decay: 20, amount: 70 });
         s.hits.push(Hit::Press { pad: 0, velocity: 127, var: None });
         // Attack 50 ms, decay 200 ms: open around 50 ms, closed again after 250 ms.
         let rms = |s: &mut Shared, v: &mut Voices, frames: usize| {
@@ -1586,9 +1634,36 @@ mod tests {
     }
 
     #[test]
+    fn tracks_play_the_program_of_their_drum_bus() {
+        let (mut s, mut v) = with_kit(48_000);
+        // Program 2 has the kit's snare on its pad A01, and DRUM2 plays it.
+        let mut second = Program::new("TWO");
+        second.pads[0].sound = s.programs[0].pads[1].sound.clone();
+        s.programs.push(second);
+        s.drums[1] = 1;
+        let note = Note { tick: 0, pad: 0, velocity: 100, duration: 10, var: None };
+        s.seqs[0].tracks[0].insert(note);
+        s.seqs[0].tracks[1].insert(note);
+        s.seqs[0].tracks[1].bus = 2;
+        // A MIDI track makes no sound of its own.
+        s.seqs[0].tracks[2].insert(note);
+        s.seqs[0].tracks[2].bus = 0;
+        s.play(true);
+        run(&mut s, &mut v, 10);
+        let mut keys: Vec<u16> = v.voices.iter().map(|v| v.key).collect();
+        keys.sort();
+        assert_eq!(keys, [0, 64]);
+        // The pads play the selected track's program.
+        s.stop();
+        s.t.track = 1;
+        assert_eq!(s.program(), 1);
+        assert!(s.pads()[0].sound.as_ref().is_some_and(|x| x.name == "SNARE"));
+    }
+
+    #[test]
     fn tune_shortens_playback() {
         let (mut s, mut v) = with_kit(48_000);
-        s.pads[2].tune = 120; // one octave up halves the hi-hat's 0.08 s
+        s.programs[0].pads[2].tune = 120; // one octave up halves the hi-hat's 0.08 s
         s.hits.push(Hit::Press { pad: 2, velocity: 100, var: None });
         run(&mut s, &mut v, 1925);
         assert!(v.voices.is_empty());

@@ -24,6 +24,8 @@ pub struct Track {
     /// Empty for the default "Track-NN".
     pub name: String,
     pub on: bool,
+    /// 0 for MIDI (the notes only go out over MIDI), 1–4 for DRUM1–4.
+    pub bus: u8,
     /// MIDI channel (0..16) the track's notes are sent on, if any.
     pub out: Option<u8>,
     /// Sorted by tick.
@@ -32,7 +34,7 @@ pub struct Track {
 
 impl Track {
     pub fn new() -> Self {
-        Self { name: String::new(), on: true, out: None, notes: Vec::new() }
+        Self { name: String::new(), on: true, bus: 1, out: None, notes: Vec::new() }
     }
 
     pub fn insert(&mut self, note: Note) {
