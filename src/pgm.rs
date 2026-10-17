@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use crate::program::{Generation, Overlap, PADS, Pad};
+use crate::program::{Generation, Overlap, PADS, Pad, Velo};
 use crate::snd;
 
 /// The MPC numbers its 64 drum notes 35–98; 34 (or 0) means "none".
@@ -31,6 +31,7 @@ pub struct NoteParams {
     /// Notes played along (SIMULT) or instead (VEL SW).
     pub also: [Option<usize>; 2],
     pub switch: [u8; 2],
+    pub velo: Velo,
 }
 
 pub struct Pgm {
@@ -90,6 +91,12 @@ pub fn parse(b: &[u8]) -> Result<Pgm, String> {
                 },
                 also: [note_index(q[3]), note_index(q[5])],
                 switch: [q[2].min(127), q[4].min(127)],
+                velo: Velo {
+                    level: q[19].min(100) as u32,
+                    attack: q[20].min(100) as u32,
+                    start: q[21].min(100) as u32,
+                    filter: q[22].min(100) as u32,
+                },
             };
             Some((n, params))
         })
@@ -156,6 +163,7 @@ pub fn load(path: &Path, rate: u32) -> Result<Loaded, String> {
             generation: q.generation,
             also: q.also.map(|m| m.and_then(pad_of_note).map(|p| p as u8)),
             switch: q.switch,
+            velo: q.velo,
         });
     }
     let mut note_pads = [None; 64];
@@ -196,6 +204,7 @@ mod tests {
                 q[8] = 34;
                 q[9..11].copy_from_slice(&(-30i16).to_le_bytes());
                 (q[11], q[12], q[13], q[14], q[15]) = (4, 20, 1, 60, 15);
+                (q[19], q[20], q[21], q[22]) = (70, 10, 20, 30);
             }
             b.extend(q);
         }
@@ -234,6 +243,7 @@ mod tests {
                 generation: Generation::VelSw,
                 also: [Some(1), None],
                 switch: [44, 0],
+                velo: Velo { level: 70, attack: 10, start: 20, filter: 30 },
             }
         );
         assert_eq!(pgm.pads[1].as_ref().unwrap().1.sound.as_deref(), Some("KICK"));

@@ -55,6 +55,8 @@ pub enum Screen {
     Assign,
     /// 16 LEVELS assign.
     Levels,
+    /// PROGRAM's VELOCITY MODULATION window.
+    Velo,
     /// TRACK MUTE: the pads mute tracks; `solo` while SOLO waits for a pad.
     TrMute {
         solo: bool,
@@ -103,7 +105,8 @@ impl Screen {
             Screen::Step => ["DELETE", "", "", "", "TR -", "TR +"],
             Screen::Load(_) => ["UP DIR", "SAVE", "", "", "PLAY", "DO IT"],
             Screen::Save(_) => ["UP DIR", "SONG", "WAV", "MIDI", "NAME", "DO IT"],
-            Screen::Program => ["LOAD", "TRIM", "MIXER", "", "", "CLEAR"],
+            Screen::Program => ["LOAD", "TRIM", "MIXER", "VELO", "", "CLEAR"],
+            Screen::Velo => ["PROGRAM", "", "", "", "", ""],
             Screen::Mixer => ["", "", "", "", "", "RESET"],
             Screen::Trim | Screen::Loop | Screen::Zone => ["TRIM", "LOOP", "ZONE", "RESET", "EDIT", "PLAY X"],
             Screen::Edit(_) => ["", "", "", "CANCEL", "DO IT", ""],
@@ -202,6 +205,10 @@ pub enum Field {
     LevelsParam,
     LevelsType,
     LevelsKey,
+    VeloLevel,
+    VeloAttack,
+    VeloStart,
+    VeloFilter,
 }
 
 /// The settings of the sequence EDIT screens, kept between visits like on the MPC.
@@ -538,6 +545,19 @@ pub fn rows(v: &View) -> Vec<Row> {
             if rows[5].left[0].text.is_empty() {
                 rows[5].left[0].text = "Pads pick the next sequence".to_owned();
             }
+            rows
+        }
+        Screen::Velo => {
+            let velo = s.pads[v.pad].velo;
+            let num = |field, v: u32| f(field, format!("{v:3}"));
+            let mut rows = vec![
+                row(vec![t("VELOCITY MODULATION  Pad:"), f(Field::Pad, pad_name(v.pad))], vec![t(sound_name(v))]),
+                row(vec![t("Velo>Level: "), num(Field::VeloLevel, velo.level)], vec![t("softer is quieter")]),
+                row(vec![t("Velo>Attack:"), num(Field::VeloAttack, velo.attack)], vec![t("softer fades in slower")]),
+                row(vec![t("Velo>Start: "), num(Field::VeloStart, velo.start)], vec![t("softer starts later")]),
+                row(vec![t("Velo>Filter:"), num(Field::VeloFilter, velo.filter)], vec![t("harder opens the filter")]),
+            ];
+            msg(&mut rows);
             rows
         }
         Screen::Levels => {

@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard, mpsc};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-use crate::program::{Frames, Overlap, PADS, Pad, Sound, Variation};
+use crate::program::{Frames, Overlap, PADS, Pad, Sound, Variation, Velo};
 use crate::seq::{Note, SEQUENCES, Sequence, TIMING, quantize};
 
 const MAX_VOICES: usize = 64;
@@ -869,7 +869,15 @@ impl Voices {
 
 fn voice(p: &Pad, sound: &Sound, pad: u8, velocity: u8, rate: u32) -> Voice {
     let r = rate as f32;
-    let (start, end) = (sound.start as f64, sound.end.min(sound.frames.len()) as f64);
+    let end = sound.end.min(sound.frames.len()) as f64;
+    // VELOCITY MODULATION, with the MPC's numbers: softer hits start up to (v² + 1) / 2 ms later,
+    // fade in more slowly and are quieter; harder hits open the filter.
+    let late = Velo::softness(velocity, p.velo.start);
+    let late = if late == 0 { 0.0 } else { (late * late + 1) as f64 / 2.0 / 1000.0 * r as f64 };
+    let start = (sound.start as f64 + late).min(end - 1.0).max(sound.start as f64);
+    let soft_attack = Velo::softness(velocity, p.velo.attack);
+    let cutoff = (p.cutoff + velocity as u32 * p.velo.filter / 127).min(100);
+    let velocity_level = (127.0 + (velocity as f32 - 127.0) * p.velo.level as f32 / 100.0) / 127.0;
     let secs = |v: u32, max: f32| (v as f32 / 100.0).powi(2) * max * r;
     // Decay is a time, as on the MPC: START decays from the end of the attack, END fades out over
     // that long before the end of the sound (0 stops it abruptly).
@@ -880,9 +888,9 @@ fn voice(p: &Pad, sound: &Sound, pad: u8, velocity: u8, rate: u32) -> Voice {
     let fade_from = (!p.decay_from_start && decay >= 1.0 && loop_to.is_none()).then(|| (end - decay as f64).max(start));
     // Equal-power pan, normalised so the centre stays at full level.
     let angle = (p.pan + 50) as f32 / 100.0 * PI / 2.0;
-    let level = p.level as f32 / 100.0 * velocity as f32 / 127.0 * std::f32::consts::SQRT_2;
+    let level = p.level as f32 / 100.0 * velocity_level * std::f32::consts::SQRT_2;
     let filter =
-        (p.cutoff < 100).then(|| Svf::new(20.0 * 1000f32.powf(p.cutoff as f32 / 100.0), p.resonance as f32 / 100.0, r));
+        (cutoff < 100).then(|| Svf::new(20.0 * 1000f32.powf(cutoff as f32 / 100.0), p.resonance as f32 / 100.0, r));
     Voice {
         pad,
         frames: sound.frames.clone(),
@@ -892,7 +900,7 @@ fn voice(p: &Pad, sound: &Sound, pad: u8, velocity: u8, rate: u32) -> Voice {
         rate: 2f64.powf(p.tune as f64 / 120.0),
         gain: [angle.cos() * level, angle.sin() * level],
         age: 0,
-        attack: secs(p.attack, 1.0) as u32,
+        attack: (secs(p.attack, 1.0) + secs(soft_attack, 1.0)) as u32,
         decay_tau,
         fade_from,
         release: None,
@@ -1383,6 +1391,27 @@ mod tests {
         assert!(s.seqs[0].looping);
         // An empty song gives nothing.
         assert!(render(bounce(&s, true)).is_empty());
+    }
+
+    #[test]
+    fn velocity_modulation() {
+        let (mut s, mut v) = with_kit(48_000);
+        let peak = |s: &mut Shared, v: &mut Voices, velocity| {
+            s.hits.push(Hit::Press { pad: 0, velocity, var: None });
+            let p = run(s, v, 48_000);
+            v.voices.clear();
+            p
+        };
+        let (soft, hard) = (peak(&mut s, &mut v, 32), peak(&mut s, &mut v, 127));
+        assert!((soft / hard - 32.0 / 127.0).abs() < 0.02);
+        // Velo→Level 0: every hit at full level.
+        s.pads[0].velo.level = 0;
+        assert!((peak(&mut s, &mut v, 32) - hard).abs() < 1e-3);
+        // Velo→Start 100: the softest hit starts (100² + 1) / 2 ms = 5 s in, past the kick's end.
+        s.pads[0].velo.start = 100;
+        s.hits.push(Hit::Press { pad: 0, velocity: 1, var: None });
+        run(&mut s, &mut v, 1);
+        assert!(v.voices.is_empty() || v.voices[0].pos >= v.voices[0].end - 2.0);
     }
 
     #[test]

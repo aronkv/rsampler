@@ -98,6 +98,34 @@ impl VarParam {
 /// A NOTE VARIATION slider position (0..=127) applied to one hit.
 pub type Variation = Option<(VarParam, u8)>;
 
+/// The MPC's VELOCITY MODULATION: how much a softer hit changes the sound, each 0..=100.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Velo {
+    /// Softer is quieter: 100 follows the velocity fully, 0 plays every hit at full level.
+    pub level: u32,
+    /// Softer hits fade in more slowly.
+    pub attack: u32,
+    /// Softer hits start later into the sound.
+    pub start: u32,
+    /// Harder hits open the filter further.
+    pub filter: u32,
+}
+
+impl Default for Velo {
+    fn default() -> Self {
+        Self { level: 100, attack: 0, start: 0, filter: 0 }
+    }
+}
+
+impl Velo {
+    /// The share of `amount` a hit of `velocity` gets, growing as the hit gets softer: the MPC's
+    /// `(128 − velocity) × amount / 127`.
+    pub fn softness(velocity: u8, amount: u32) -> u32 {
+        (128 - velocity.min(127) as u32) * amount / 127
+    }
+}
+
 #[derive(Clone)]
 pub struct Pad {
     pub sound: Option<Sound>,
@@ -126,6 +154,7 @@ pub struct Pad {
     pub also: [Option<u8>; 2],
     /// VEL SW: a velocity above `switch[i]` plays `also[i]` (the higher one wins).
     pub switch: [u8; 2],
+    pub velo: Velo,
 }
 
 impl Default for Pad {
@@ -146,6 +175,7 @@ impl Default for Pad {
             generation: Generation::Normal,
             also: [None, None],
             switch: [64, 100],
+            velo: Velo::default(),
         }
     }
 }
@@ -187,6 +217,7 @@ impl Pad {
             generation: self.generation,
             also: self.also,
             switch: self.switch,
+            velo: self.velo,
         };
         if let Some((param, v)) = var {
             let scaled = v.min(127) as u32 * 100 / 127;

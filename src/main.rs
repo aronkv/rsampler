@@ -670,6 +670,10 @@ impl App {
                     *m = (v >= 0 && v as usize != pad).then_some(v as u8);
                 }
                 Field::Level => p.level = step(p.level, 0, 100),
+                Field::VeloLevel => p.velo.level = step(p.velo.level, 0, 100),
+                Field::VeloAttack => p.velo.attack = step(p.velo.attack, 0, 100),
+                Field::VeloStart => p.velo.start = step(p.velo.start, 0, 100),
+                Field::VeloFilter => p.velo.filter = step(p.velo.filter, 0, 100),
                 Field::Pan => p.pan = (p.pan + d).clamp(-50, 50),
                 Field::Start | Field::End | Field::LoopTo | Field::LoopLen | Field::Looping => {
                     if let Some(snd) = &mut p.sound {
@@ -1247,6 +1251,8 @@ impl App {
             (Screen::Program, 0) => self.mode("LOAD"),
             (Screen::Program, 1) => self.mode("TRIM"),
             (Screen::Program, 2) => self.mode("MIXER"),
+            (Screen::Program, 3) => self.set_screen(Screen::Velo),
+            (Screen::Velo, 0) => self.set_screen(Screen::Program),
             (Screen::Program, 5) => {
                 self.with(|s| s.pads[pad].sound = None);
                 self.say("Sound removed");

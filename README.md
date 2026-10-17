@@ -224,6 +224,18 @@ Open it with the blue **6 / PROGRAM** key. Hit a pad (or change `Pad`) to choose
 
 **CLEAR** (F6) removes the pad's sound.
 
+**VELO** (F4) opens the VELOCITY MODULATION window: how much the strength of a hit shapes the
+sound, each 0–100, for expressive playing from MIDI pads:
+
+| Field         | What it does                                                         |
+| ------------- | -------------------------------------------------------------------- |
+| `Velo>Level`  | Softer hits are quieter; 100 (the default) follows velocity fully, 0 plays every hit at full level |
+| `Velo>Attack` | Softer hits fade in more slowly                                      |
+| `Velo>Start`  | Softer hits start later into the sound, skipping the sharp beginning |
+| `Velo>Filter` | Harder hits open the filter further (set `Filter` below 100 first)   |
+
+**PROGRAM** (F1) goes back.
+
 ### MIXER
 
 The blue **8 / MIXER** key shows the 16 pads of the current bank as level faders with pan markers.
@@ -285,8 +297,8 @@ directly.
 
 An MPC2000XL program (`.PGM`) loads onto all 64 pads at once (press `Enter` twice): each pad gets
 its sound from the `.SND` files next to the program, with the program's tuning, envelope, filter,
-overlap, mute assign, SIMULT / VEL SW mode, level and pan. Sounds that are not there are listed on
-the LCD. The MPC's velocity modulation and decay switch are not carried over yet.
+overlap, mute assign, SIMULT / VEL SW mode, velocity modulation, level and pan. Sounds that are not
+there are listed on the LCD. The MPC's filter envelope is not carried over yet.
 
 ### SAMPLE: recording from the input
 
