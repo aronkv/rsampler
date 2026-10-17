@@ -957,9 +957,12 @@ impl App {
             return self.with(|s| s.undo());
         }
         let Some(before) = self.sound_undo.take() else { return };
+        // A program deleted or replaced since then is left alone.
         let after = self.with(|s| {
+            let count = s.programs.len();
             before
                 .into_iter()
+                .filter(|((prog, _), _)| *prog < count)
                 .map(|((prog, p), pad)| ((prog, p), std::mem::replace(&mut s.programs[prog].pads[p], pad)))
                 .collect()
         });
@@ -1363,8 +1366,9 @@ impl App {
                 if port != self.midi_out.port {
                     self.open_out_port(&port);
                 }
-                // The MPC note maps belonged to the programs just replaced.
+                // The MPC note maps and sound edits belonged to the programs just replaced.
                 self.mpc_notes.clear();
+                self.sound_undo = None;
                 self.project = Some(path);
                 self.title_changed = true;
                 (self.pad, self.bank, self.focus) = (0, 0, 0);
@@ -1567,6 +1571,10 @@ impl App {
             }
         });
         self.mpc_notes = maps;
+        // Sound edits on other programs cannot be undone once the programs moved.
+        if key == 3 {
+            self.sound_undo = None;
+        }
         self.say(msg);
     }
 
