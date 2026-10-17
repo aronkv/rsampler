@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/rsampler.svg" alt="rsampler icon" width="128">
+  <img src="assets/screenshot.png" alt="rsampler playing a sequence: the LCD, DATA wheel, transport and 16 pads" width="760">
 </p>
 
 <h1 align="center">rsampler</h1>
