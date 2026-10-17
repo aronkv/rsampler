@@ -458,7 +458,8 @@ pub fn load(root: &Path, rate: u32) -> Result<Loaded, String> {
                     [param, value] => VarParam::ALL.get(param as usize).map(|p| (*p, value.min(127) as u8)),
                     _ => None,
                 };
-                if tick < len && (pad as usize) < PADS {
+                let top = if track.bus == 0 { crate::seq::KEYS } else { PADS };
+                if tick < len && (pad as usize) < top {
                     track.insert(Note {
                         tick,
                         pad: pad as u8,

@@ -1,6 +1,14 @@
 //! Sequences, tracks and note events, timed in ticks like the MPC2000XL (96 per quarter note).
 
 pub const PPQ: u32 = 96;
+/// MIDI notes, the range of a MIDI track's notes.
+pub const KEYS: usize = 128;
+
+/// A MIDI note's name, middle C (60) being C3 as on the MPC.
+pub fn note_name(note: u8) -> String {
+    const NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    format!("{}{}", NAMES[note as usize % 12], note as i32 / 12 - 2)
+}
 pub const SEQUENCES: usize = 99;
 pub const TRACKS: usize = 64;
 
@@ -11,7 +19,7 @@ pub const TIMING: [(&str, u32); 7] =
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Note {
     pub tick: u32,
-    /// Program note, 0..64 (pads A01–D16).
+    /// On a DRUM track the pad, 0..64 (A01–D16); on a MIDI track the MIDI note, 0..128.
     pub pad: u8,
     pub velocity: u8,
     pub duration: u32,

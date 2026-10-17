@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard, mpsc};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::program::{DRUMS, Frames, Overlap, PADS, Pad, Program, Sound, Variation, Velo};
-use crate::seq::{Note, SEQUENCES, Sequence, TIMING, quantize};
+use crate::seq::{KEYS, Note, SEQUENCES, Sequence, TIMING, quantize};
 
 const MAX_VOICES: usize = 64;
 
@@ -62,11 +62,11 @@ pub struct Transport {
     pub click: bool,
     /// ERASE held: pads hit now delete their notes on the current track as the playhead passes.
     pub erase: bool,
-    erasing: [bool; PADS],
+    erasing: [bool; KEYS],
     /// NOTE REPEAT held: held pads play again on every Timing grid line.
     pub repeat: bool,
     /// Pads held down, with the velocity and variation they were hit with.
-    held: [Option<(u8, Variation)>; PADS],
+    held: [Option<(u8, Variation)>; KEYS],
     /// Notes recorded this pass, with the unquantized press position while the pad is still
     /// held; merged into the track when the loop wraps or playback stops, so recording in REC
     /// mode cannot erase them.
@@ -200,9 +200,9 @@ impl Shared {
                 count_in: true,
                 click: false,
                 erase: false,
-                erasing: [false; PADS],
+                erasing: [false; KEYS],
                 repeat: false,
-                held: [None; PADS],
+                held: [None; KEYS],
                 pending: Vec::new(),
                 note_offs: Vec::new(),
                 undo: None,
@@ -304,6 +304,16 @@ impl Shared {
     /// MIDI channel of the selected track, for passing pad hits through.
     fn thru(&self) -> Option<u8> {
         self.seq().tracks[self.t.track].out
+    }
+
+    /// Whether the selected track is a MIDI track, whose notes are MIDI notes rather than pads.
+    pub fn midi_track(&self) -> bool {
+        self.seq().tracks[self.t.track].bus == 0
+    }
+
+    /// The MIDI note a note of the selected track goes out as: pads A01–D16 are 36–99.
+    fn out_note(&self, pad: u8) -> u8 {
+        if self.midi_track() { pad } else { pad + crate::midi::FIRST_NOTE }
     }
 
     /// Plays the song from `step`. Song mode does not record.
@@ -440,7 +450,7 @@ impl Shared {
             self.seqs[seqi].tracks[track].erase(tick, tick + 1, None);
         }
         if self.t.erase {
-            for pad in (0..PADS).filter(|&p| self.t.erasing[p]) {
+            for pad in (0..KEYS).filter(|&p| self.t.erasing[p]) {
                 self.seqs[seqi].tracks[track].erase(tick, tick + 1, Some(pad as u8));
             }
         }
@@ -468,7 +478,7 @@ impl Shared {
         // NOTE REPEAT plays the held pads on the grid; with Timing OFF it uses 1/16.
         let grid = if self.grid() > 1 { self.grid() } else { 24 };
         if self.t.repeat && tick.is_multiple_of(grid) {
-            for pad in 0..PADS {
+            for pad in 0..KEYS {
                 if let Some((velocity, var)) = self.t.held[pad] {
                     if let Some(p) = self.program_of(&self.seq().tracks[self.t.track]) {
                         voices.trigger(&self.programs[p].pads, p, pad as u8, velocity, var);
@@ -495,7 +505,8 @@ impl Shared {
                 };
                 for n in t.range(at, at + 1) {
                     if let (Some(ch), Some(out)) = (t.out, &self.midi_out) {
-                        let note = (n.pad as i32 + crate::midi::FIRST_NOTE as i32 + shift).clamp(0, 127) as u8;
+                        let base = if t.bus == 0 { 0 } else { crate::midi::FIRST_NOTE as i32 };
+                        let note = (n.pad as i32 + base + shift).clamp(0, 127) as u8;
                         let _ = out.send([0x90 | ch, note, n.velocity]);
                         self.t.midi_offs.push((0x80 | ch, note, (tick + n.duration.max(1)) % len));
                     }
@@ -505,7 +516,7 @@ impl Shared {
                         continue;
                     };
                     voices.trigger(&self.programs[p].pads, p, n.pad, n.velocity, n.var);
-                    if self.programs[p].pads[n.pad as usize].note_off() {
+                    if self.programs[p].pads.get(n.pad as usize).is_some_and(Pad::note_off) {
                         self.t.note_offs.push((key(p, n.pad), (tick + n.duration) % len));
                     }
                 }
@@ -644,7 +655,7 @@ impl Shared {
                     voices.trigger(&self.programs[p].pads, p, pad, velocity, var);
                 }
                 if let Some(ch) = self.thru() {
-                    self.send([0x90 | ch, pad + crate::midi::FIRST_NOTE, velocity]);
+                    self.send([0x90 | ch, self.out_note(pad), velocity]);
                 }
                 if self.t.playing && self.t.rec != RecMode::Off && self.t.tick >= 0.0 && self.t.punch.allows(self.now())
                 {
@@ -664,15 +675,17 @@ impl Shared {
                 self.t.held[pad as usize] = None;
                 self.t.erasing[pad as usize] = false;
                 if let Some(ch) = self.thru() {
-                    self.send([0x80 | ch, pad + crate::midi::FIRST_NOTE, 0]);
+                    self.send([0x80 | ch, self.out_note(pad), 0]);
                 }
                 // Only NOTE OFF sounds stop when the pad is let go; the others play out.
                 // With SIMULT or VEL SW the hit may be sounding on the other pads too.
-                let p = self.program();
-                let pads = &self.programs[p].pads;
-                for target in std::iter::once(pad).chain(pads[pad as usize].also.into_iter().flatten()) {
-                    if pads.get(target as usize).is_some_and(Pad::note_off) {
-                        voices.release(key(p, target));
+                if let Some(p) = self.program_of(&self.seq().tracks[self.t.track]) {
+                    let pads = &self.programs[p].pads;
+                    let also = pads.get(pad as usize).map_or([None; 2], |x| x.also);
+                    for target in std::iter::once(pad).chain(also.into_iter().flatten()) {
+                        if pads.get(target as usize).is_some_and(Pad::note_off) {
+                            voices.release(key(p, target));
+                        }
                     }
                 }
                 let len = self.seq().len();
@@ -963,7 +976,9 @@ impl Voices {
 
     /// Plays `pad` of program number `program`, whose pads are `pads`.
     fn trigger(&mut self, pads: &[Pad], program: usize, pad: u8, velocity: u8, var: Variation) {
-        for target in pads[pad as usize].targets(pad, velocity) {
+        // A note past the 64 pads (one recorded on a MIDI track) plays nothing.
+        let Some(hit) = pads.get(pad as usize) else { return };
+        for target in hit.targets(pad, velocity) {
             // The NOTE VARIATION belongs to the pad that was hit.
             self.play(pads, program, target, velocity, if target == pad { var } else { None });
         }
@@ -1682,6 +1697,32 @@ mod tests {
         s.t.track = 1;
         assert_eq!(s.program(), 1);
         assert!(s.pads()[0].sound.as_ref().is_some_and(|x| x.name == "SNARE"));
+    }
+
+    #[test]
+    fn midi_tracks_keep_whole_notes_and_make_no_sound() {
+        let (mut s, mut v) = with_kit(48_000);
+        let (tx, rx) = mpsc::channel();
+        s.midi_out = Some(tx);
+        s.t.count_in = false;
+        let track = &mut s.seqs[0].tracks[0];
+        (track.bus, track.out) = (0, Some(0));
+        // Note 110 is past the pads; recorded, it stays 110 and goes out as 110.
+        s.toggle_rec(RecMode::Overdub);
+        s.play(true);
+        run(&mut s, &mut v, 250 * 2);
+        s.hits.push(Hit::Press { pad: 110, velocity: 80, var: None });
+        assert_eq!(run(&mut s, &mut v, 250 * 3), 0.0);
+        s.hits.push(Hit::Release { pad: 110 });
+        run(&mut s, &mut v, 10);
+        s.stop();
+        assert_eq!(s.seq().tracks[0].notes[0].pad, 110);
+        let msgs: Vec<[u8; 3]> = rx.try_iter().collect();
+        assert!(msgs.contains(&[0x90, 110, 80]) && msgs.contains(&[0x80, 110, 0]));
+        // Played back: out again, still silent.
+        s.play(true);
+        assert_eq!(run(&mut s, &mut v, 250 * 4), 0.0);
+        assert!(rx.try_iter().any(|m| m == [0x90, 110, 80]));
     }
 
     #[test]

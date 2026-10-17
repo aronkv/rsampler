@@ -160,10 +160,26 @@ fn input() -> Option<MidiInput> {
 }
 
 fn forward(shared: &Mutex<Shared>, stamp_us: u64, msg: &[u8]) {
-    if let Some(hit) = parse(msg) {
-        lock(shared).hits.push(hit);
+    let mut s = lock(shared);
+    // A MIDI track takes every note as it is, for sequencing a synth from a keyboard.
+    if s.midi_track()
+        && let Some(hit) = parse_raw(msg)
+    {
+        s.hits.push(hit);
+    } else if let Some(hit) = parse(msg) {
+        s.hits.push(hit);
     } else if matches!(msg.first(), Some(0xF2 | 0xF8 | 0xFA | 0xFB | 0xFC)) {
-        lock(shared).midi_sync(msg, stamp_us);
+        s.midi_sync(msg, stamp_us);
+    }
+}
+
+/// A note message with the note number kept whole, for MIDI tracks.
+fn parse_raw(msg: &[u8]) -> Option<Hit> {
+    let [status, note, velocity] = *msg else { return None };
+    match status & 0xF0 {
+        0x90 if velocity > 0 => Some(Hit::Press { pad: note & 0x7F, velocity, var: None }),
+        0x80 | 0x90 => Some(Hit::Release { pad: note & 0x7F }),
+        _ => None,
     }
 }
 
@@ -181,5 +197,7 @@ mod tests {
         assert_eq!(parse(&[0x90, 100, 100]), None);
         assert_eq!(parse(&[0xB0, 36, 100]), None);
         assert_eq!(parse(&[0xF8]), None);
+        assert_eq!(parse_raw(&[0x91, 20, 70]), Some(Hit::Press { pad: 20, velocity: 70, var: None }));
+        assert_eq!(parse_raw(&[0x81, 120, 0]), Some(Hit::Release { pad: 120 }));
     }
 }

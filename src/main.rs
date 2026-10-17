@@ -321,15 +321,17 @@ impl App {
         } else {
             (self.bank * 16 + n, velocity, None)
         };
-        self.sent[n] = pad as u8;
         self.velocity = velocity;
         if !self.sixteen_levels {
             self.pad = pad;
         }
         let var = levels.or((pad == self.var_pad).then_some((self.var_param, self.var_value)));
-        self.with(|s| s.hits.push(Hit::Press { pad: pad as u8, velocity, var }));
+        // On a MIDI track the pads are MIDI notes 36–99.
+        let note = if self.with(|s| s.midi_track()) { pad as u8 + midi::FIRST_NOTE } else { pad as u8 };
+        self.sent[n] = note;
+        self.with(|s| s.hits.push(Hit::Press { pad: note, velocity, var }));
         if matches!(self.screen, Screen::Step) {
-            self.step_record(pad as u8, velocity, var);
+            self.step_record(note, velocity, var);
         }
     }
 
@@ -370,12 +372,13 @@ impl App {
         let (sel, fine) = (self.step, self.shift);
         let moved = self.with(|s| {
             let (tr, len, grid) = (s.t.track, s.seq().len(), s.grid());
+            let top = if s.midi_track() { seq::KEYS } else { PADS };
             let track = &mut s.seq_mut().tracks[tr];
             let mut n = *track.notes.get(sel)?;
             let unit = if fine { 1 } else { grid } as i64;
             match field {
                 Field::NotePos => n.tick = (n.tick as i64 + d as i64 * unit).rem_euclid(len as i64) as u32,
-                Field::NotePad => n.pad = (n.pad as i32 + d).clamp(0, PADS as i32 - 1) as u8,
+                Field::NotePad => n.pad = (n.pad as i32 + d).clamp(0, top as i32 - 1) as u8,
                 Field::NoteVel => n.velocity = (n.velocity as i32 + d).clamp(1, 127) as u8,
                 _ => n.duration = (n.duration as i64 + d as i64 * unit).clamp(1, len as i64) as u32,
             }
@@ -1177,6 +1180,10 @@ impl App {
         // drum notes 35–98 go to pads A01–D16 in order.
         let (drums, maps) = (self.with(|s| s.drums), self.mpc_notes.clone());
         let pad_of = |track: usize, note: u8, bus: u8| {
+            // MIDI tracks keep their notes as they are.
+            if bus == 0 {
+                return Some(note & 0x7F);
+            }
             let n = (note as usize).checked_sub(35).filter(|n| *n < PADS)?;
             let map = bus.checked_sub(1).and_then(|b| maps.get(drums[b as usize]).copied().flatten());
             map.map_or(Some(n as u8), |m| m[n]).filter(|_| track < seq::TRACKS)

@@ -857,9 +857,13 @@ pub fn rows(v: &View) -> Vec<Row> {
                 ],
                 vec![t(format!("Now:{}", seq.bbt(s.now())))],
             )];
+            // A MIDI track's notes are MIDI notes, a DRUM track's are pads with their sounds.
+            let midi = s.midi_track();
             let name = |pad: u8| {
-                s.pads()[pad as usize].sound.as_ref().map_or(String::new(), |snd| snd.name.chars().take(8).collect())
+                let sound = s.pads().get(pad as usize).and_then(|p| p.sound.as_ref());
+                if midi { String::new() } else { sound.map_or(String::new(), |snd| snd.name.chars().take(8).collect()) }
             };
+            let pad_name = |pad: usize| if midi { crate::seq::note_name(pad as u8) } else { pad_name(pad) };
             let start = v.step.saturating_sub(1).min(notes.len().saturating_sub(4));
             for (i, n) in notes.iter().enumerate().skip(start).take(4) {
                 let (pos, pad, vel, dur) =

@@ -219,7 +219,7 @@ pub fn from_sequence(seq: &Sequence) -> Vec<u8> {
         let ch = t.out.unwrap_or(0);
         let mut events: Vec<(u32, Vec<u8>)> = Vec::new();
         for n in &t.notes {
-            let key = n.pad + crate::midi::FIRST_NOTE;
+            let key = if t.bus == 0 { n.pad } else { n.pad + crate::midi::FIRST_NOTE };
             events.push((n.tick, vec![0x90 | ch, key, n.velocity.max(1)]));
             events.push(((n.tick + n.duration).min(len), vec![0x80 | ch, key, 0]));
         }

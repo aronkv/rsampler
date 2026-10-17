@@ -424,6 +424,11 @@ nothing. The choice is saved with the project. A track whose `Out` field is set 
 its notes there as it plays (pad A01 = note 36 again), and pads you hit pass through on the
 selected track's channel, so the pads can play an external synth.
 
+**MIDI tracks** (`Bus` MIDI on the MAIN screen) make rsampler a sequencer for synths: they take
+every note 0–127 from a MIDI keyboard as it is (the pads play 36–99), record and play them back
+over MIDI on the track's `Out` channel, and make no sound of their own. STEP EDIT shows their notes
+by name (C3 is middle C, as on the MPC) and changes them over the whole range.
+
 **Clock out:** with `MIDI clock out` on in SETUP, rsampler sends MIDI clock while playing, and
 start, stop, or song position and continue, so a DAW or drum machine can follow its tempo.
 
