@@ -2300,7 +2300,7 @@ impl App {
         // Scrolling over the LCD turns the DATA wheel.
         let resp = ui.interact(screen, ui.scope_id().with("lcd"), Sense::hover());
         if resp.hovered() {
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y) / s;
+            let scroll = scroll_points(ui, s) / s;
             self.turn(scroll);
         }
     }
@@ -2409,7 +2409,7 @@ impl App {
             ui.scope_id().with("data"),
             Sense::drag(),
         );
-        let scroll = if resp.hovered() { ui.input(|i| i.smooth_scroll_delta.y) } else { 0.0 };
+        let scroll = if resp.hovered() { scroll_points(ui, s) } else { 0.0 };
         // Dragging up or scrolling up turns the wheel clockwise, which increases the value.
         self.turn((-resp.drag_delta().y + scroll) / s);
         wheel(painter, p, center, 62.0, self.wheel_angle);
@@ -2450,7 +2450,7 @@ impl App {
             self.var_value = (v.clamp(0.0, 1.0) * 127.0).round() as u8;
         }
         if resp.hovered() {
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y) / s / 4.0;
+            let scroll = scroll_points(ui, s) / s / 4.0;
             self.var_value = (self.var_value as f32 + scroll).clamp(0.0, 127.0).round() as u8;
         }
         if resp.double_clicked() {
@@ -2570,7 +2570,7 @@ impl App {
             ui.scope_id().with("gain"),
             Sense::drag(),
         );
-        let scroll = if resp.hovered() { ui.input(|i| i.smooth_scroll_delta.y) } else { 0.0 };
+        let scroll = if resp.hovered() { scroll_points(ui, s) } else { 0.0 };
         self.rec_gain = (self.rec_gain + (-resp.drag_delta().y + scroll) / s / 120.0).clamp(0.0, 1.0);
         knob(painter, p, center, 20.0, Color32::from_rgb(0xe9, 0xa0, 0xa6), self.rec_gain);
         p.label(painter, 885.0, 135.0, "MAIN VOLUME", 8.0);
@@ -2580,7 +2580,7 @@ impl App {
             ui.scope_id().with("volume"),
             Sense::drag(),
         );
-        let scroll = if resp.hovered() { ui.input(|i| i.smooth_scroll_delta.y) } else { 0.0 };
+        let scroll = if resp.hovered() { scroll_points(ui, s) } else { 0.0 };
         let delta = (-resp.drag_delta().y + scroll) / s / 120.0;
         let volume = self.with(|st| {
             st.master = (st.master + delta).clamp(0.0, 1.0);
@@ -2647,6 +2647,26 @@ fn sibling(path: &std::path::Path, ext: &str) -> Option<PathBuf> {
     std::fs::read_dir(path.parent()?).ok()?.flatten().map(|e| e.path()).find(|p| {
         p.file_stem().is_some_and(|s| s.eq_ignore_ascii_case(stem))
             && p.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext))
+    })
+}
+
+/// This frame's mouse wheel movement, in points. A wheel notch counts as exactly one DATA
+/// step (`WHEEL_STEP` design units at scale `scale`), so values move one notch at a time; touchpads
+/// report points and scroll smoothly. egui's smoothed scroll would spread a notch over several
+/// frames and, with the step size, turn one notch into several steps.
+fn scroll_points(ui: &Ui, scale: f32) -> f32 {
+    ui.input(|i| {
+        i.events
+            .iter()
+            .map(|e| match e {
+                egui::Event::MouseWheel { unit, delta, .. } => match unit {
+                    egui::MouseWheelUnit::Point => delta.y,
+                    egui::MouseWheelUnit::Line => delta.y * WHEEL_STEP * scale,
+                    egui::MouseWheelUnit::Page => delta.y * WHEEL_STEP * scale * 10.0,
+                },
+                _ => 0.0,
+            })
+            .sum()
     })
 }
 
