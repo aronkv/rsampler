@@ -13,6 +13,8 @@ pub enum Op {
     LoopStEnd,
     /// Copies the section to another pad as a new sound.
     NewSound,
+    /// Puts another pad's sound in at the start of the section.
+    Insert,
     Delete,
     Silence,
     Reverse,
@@ -24,10 +26,11 @@ pub enum Op {
 }
 
 impl Op {
-    pub const ALL: [Op; 9] = [
+    pub const ALL: [Op; 10] = [
         Op::Discard,
         Op::LoopStEnd,
         Op::NewSound,
+        Op::Insert,
         Op::Delete,
         Op::Silence,
         Op::Reverse,
@@ -41,6 +44,7 @@ impl Op {
             Op::Discard => "DISCARD",
             Op::LoopStEnd => "LOOP FROM ST TO END",
             Op::NewSound => "SECTION -> NEW SOUND",
+            Op::Insert => "INSERT SOUND -> SECTION START",
             Op::Delete => "DELETE SECTION",
             Op::Silence => "SILENCE SECTION",
             Op::Reverse => "REVERSE SECTION",
@@ -93,12 +97,25 @@ pub fn apply(snd: &mut Sound, op: Op, section: Range<usize>) {
                 frames[section].iter_mut().flatten().for_each(|x| *x /= peak);
             }
         }
-        Op::NewSound | Op::Slice | Op::TimeStretch => return,
+        Op::NewSound | Op::Slice | Op::TimeStretch | Op::Insert => return,
     }
     let len = frames.len().max(1);
     snd.end = snd.end.clamp(1, len);
     snd.start = snd.start.min(snd.end - 1);
     snd.loop_to = snd.loop_to.min(snd.end - 1);
+    snd.frames = frames.into();
+}
+
+/// INSERT SOUND: `other` goes in at `at`; the points after it move back with the audio.
+pub fn insert(snd: &mut Sound, at: usize, other: &[[f32; 2]]) {
+    let at = at.min(snd.frames.len());
+    let mut frames = snd.frames.to_vec();
+    frames.splice(at..at, other.iter().copied());
+    let moved = |v: usize| if v > at { v + other.len() } else { v };
+    (snd.end, snd.loop_to) = (moved(snd.end), moved(snd.loop_to));
+    if snd.start > at {
+        snd.start += other.len();
+    }
     snd.frames = frames.into();
 }
 
@@ -226,6 +243,15 @@ mod tests {
             let peak = mid.iter().fold(0.0f32, |m, f| m.max(f[0].abs()));
             assert!(peak > 0.45 && peak < 0.55, "ratio {ratio}: peak {peak}");
         }
+    }
+
+    #[test]
+    fn insert_moves_later_points_back() {
+        let mut s = sound(4);
+        (s.start, s.end, s.loop_to) = (0, 4, 3);
+        insert(&mut s, 2, &sound(2).frames);
+        assert_eq!(left(&s), [0.0, 1.0, 0.0, 1.0, 2.0, 3.0]);
+        assert_eq!((s.start, s.end, s.loop_to), (0, 6, 5));
     }
 
     #[test]

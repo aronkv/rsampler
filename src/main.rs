@@ -934,6 +934,22 @@ impl App {
         if op == edit::Op::TimeStretch {
             return self.time_stretch(range, ratio, from);
         }
+        if op == edit::Op::Insert {
+            let msg = self.with(|s| {
+                let Some(other) = s.pads[to].sound.as_ref().map(|o| o.frames.clone()) else {
+                    return "That pad has no sound".to_owned();
+                };
+                match &mut s.pads[pad].sound {
+                    Some(snd) => {
+                        edit::insert(snd, range.start, &other);
+                        format!("Inserted the sound of {}", program::pad_name(to))
+                    }
+                    None => "No sound on this pad".to_owned(),
+                }
+            });
+            self.set_screen(from.screen());
+            return self.say(msg);
+        }
         let msg = self.with(|s| {
             let Some(snd) = s.pads[pad].sound.clone() else { return "No sound on this pad".to_owned() };
             if !op.makes_sounds() {

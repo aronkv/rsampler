@@ -1014,6 +1014,12 @@ pub fn rows(v: &View) -> Vec<Row> {
                 row(vec![t(format!("Section: {what}"))], vec![]),
                 row(vec![t("Edit:"), f(Field::EditOp, op.label())], vec![]),
             ];
+            if op == crate::edit::Op::Insert {
+                rows.push(row(
+                    vec![t("Sound of pad:"), f(Field::EditTo, pad_name(to)), t(format!(" {}", sound_name_of(s, to)))],
+                    vec![],
+                ));
+            }
             if op.makes_sounds() {
                 let count = if op == crate::edit::Op::Slice { v.zone.1.len().saturating_sub(1) } else { 1 };
                 let last = (to + count - 1).min(crate::program::PADS - 1);

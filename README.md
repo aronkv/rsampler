@@ -284,6 +284,7 @@ Every point moves by 1/500 of the sound per DATA wheel step, or by single frames
 | DISCARD               | Keeps only the section and throws away the rest                |
 | LOOP FROM ST TO END   | Sets `To` to `St` and turns `Loop` on                           |
 | SECTION -> NEW SOUND  | Copies the section to `To pad`                                 |
+| INSERT SOUND -> SECTION START | Puts the sound of another pad (`Sound of pad`) in at the start of the section, e.g. to join two chops |
 | DELETE SECTION        | Cuts the section out                                           |
 | SILENCE SECTION       | Makes the section silent                                       |
 | REVERSE SECTION       | Plays the section backwards                                    |
@@ -431,7 +432,6 @@ shows the version and the output sample rate.
 ### Not there yet
 
 - Windows-specific testing
-- INSERT SOUND in the EDIT window
 - Effects and the MPC's multiple programs per project (one program plays all tracks here)
 
 ## Reference
