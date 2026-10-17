@@ -53,7 +53,7 @@ installing.
 ## Usage
 
 [Pads](#pads) · [NOTE VARIATION](#note-variation) · [Recording](#recording-a-sequence) ·
-[SONG](#song) · [STEP EDIT](#step-edit) · [PROGRAM](#program-how-each-pad-plays) · [MIXER](#mixer) ·
+[EDIT](#edit-copying-bars-and-notes) · [SONG](#song) · [STEP EDIT](#step-edit) · [PROGRAM](#program-how-each-pad-plays) · [MIXER](#mixer) ·
 [TRIM](#trim-loop-and-zone-editing-a-sound) · [Loading samples](#loading-samples) · [SAMPLE](#sample-recording-from-the-input) ·
 [Projects](#saving-and-loading-projects) · [MIDI](#midi) · [Shortcuts](#keyboard-shortcuts)
 
@@ -136,7 +136,7 @@ first loop so the new take is kept. Pressing **REC** or **OVERDUB** while playin
 Notes are quantized to `Timing` as they are recorded; **OPEN WINDOW** on the `Timing` field (timing
 correct) quantizes a whole track afterwards.
 
-**UNDO SEQ** (F2, `Ctrl+Z`) takes back the last recording or edit; its light shows that it can.
+**UNDO SEQ** (`Ctrl+Z`) takes back the last recording or edit; its light shows that it can.
 Hold **ERASE** (or `Delete`) while playing and hold pads to delete their notes as the playhead
 passes. **TR.ON** (F3) and **TRACK MUTE** mute the track, **SOLO** (F4) plays only this track,
 **TR -** / **TR +** (F5/F6) change track and **NEXT SEQ** queues the next sequence.
@@ -147,6 +147,26 @@ While stopped the same key taps the tempo.
 
 **LOCATE**: **STEP <** / **>** move by the `Timing` grid, **BAR <<** / **>>** by a bar, and
 **GO TO** returns to the start. **STOP** pressed while stopped also returns to the start.
+
+### EDIT: copying bars and notes
+
+**EDIT** (F2 on the MAIN screen) works on whole stretches of a sequence, like the MPC's EDIT mode.
+It opens on the whole current sequence; **EVENTS** (F1) and **BARS** (F2) switch between its two
+pages, and **DO IT** (F6) applies the edit and returns to MAIN. **UNDO SEQ** takes it back. Times
+move by bars, or by beats with Shift.
+
+**BARS** copies bars, the quickest way to turn a 2-bar loop into 8 bars: bars `First bar` to
+`Last bar` of `From sq` are inserted `Copies` times into `To sq` after `After bar` (0 = before the
+first bar), and the bars after them move back. Both sequences need the same time signature.
+
+**EVENTS** works on the notes of the current track (`Sq`, `Tr`) within `Time`, of one pad or ALL
+(`Notes`):
+
+| Edit     | What it does                                                                 |
+| -------- | ---------------------------------------------------------------------------- |
+| COPY     | Copies the notes to `To sq` / `tr` from `Start`, `Copies` times one after another. REPLACE clears that stretch first, MERGE adds to it |
+| DURATION | Changes their length: `Mode` ADD VALUE, SUB VALUE, MULTI VAL% or SET TO VAL, by `Value` ticks (or percent) |
+| VELOCITY | Changes their velocity the same way, between 1 and 127                        |
 
 ### SONG
 

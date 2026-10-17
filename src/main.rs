@@ -137,6 +137,7 @@ struct App {
     edit_op: edit::Op,
     /// EDIT: the first pad new sounds go to.
     edit_to: usize,
+    seq_edit: lcd::SeqEdit,
 }
 
 /// Something the keyboard asked for this frame.
@@ -224,6 +225,22 @@ impl App {
             zone: 0,
             edit_op: edit::Op::Discard,
             edit_to: 16,
+            seq_edit: lcd::SeqEdit {
+                op: seq::EventOp::Copy,
+                pad: None,
+                from: 0,
+                to: 0,
+                to_seq: 0,
+                to_track: 0,
+                merge: false,
+                start: 0,
+                copies: 1,
+                mode: seq::ValueMode::Add,
+                value: 1,
+                first_bar: 1,
+                last_bar: 1,
+                after_bar: 1,
+            },
         }
     }
 
@@ -346,6 +363,7 @@ impl App {
             var: (self.var_pad, self.var_param, self.var_value),
             zone: (self.zone, &self.zones),
             edit: (self.edit_op, self.edit_to),
+            seq_edit: &self.seq_edit,
             sample: self.input.as_ref().map(|input| {
                 let c = input.lock();
                 lcd::SampleView {
@@ -467,6 +485,20 @@ impl App {
                 let i = ops.iter().position(|o| *o == self.edit_op).unwrap_or(0) as i32;
                 return self.edit_op = ops[(i + d).clamp(0, ops.len() as i32 - 1) as usize];
             }
+            Field::EvOp
+            | Field::EvPad
+            | Field::EvFrom
+            | Field::EvTo
+            | Field::EvToSeq
+            | Field::EvToTrack
+            | Field::EvMerge
+            | Field::EvStart
+            | Field::EvCopies
+            | Field::EvMode
+            | Field::EvValue
+            | Field::FirstBar
+            | Field::LastBar
+            | Field::AfterBar => return self.adjust_seq_edit(field, d, fine),
             Field::EditTo => return self.edit_to = (self.edit_to as i32 + d).clamp(0, PADS as i32 - 1) as usize,
             Field::VarPad => return self.var_pad = (self.var_pad as i32 + d).clamp(0, PADS as i32 - 1) as usize,
             Field::VarParam => {
@@ -622,9 +654,121 @@ impl App {
                 | Field::ZoneStart
                 | Field::ZoneEnd
                 | Field::EditOp
-                | Field::EditTo => {}
+                | Field::EditTo
+                | Field::EvOp
+                | Field::EvPad
+                | Field::EvFrom
+                | Field::EvTo
+                | Field::EvToSeq
+                | Field::EvToTrack
+                | Field::EvMerge
+                | Field::EvStart
+                | Field::EvCopies
+                | Field::EvMode
+                | Field::EvValue
+                | Field::FirstBar
+                | Field::LastBar
+                | Field::AfterBar => {}
             }
         });
+    }
+
+    fn adjust_seq_edit(&mut self, field: Field, d: i32, fine: bool) {
+        use seq::{EventOp, ValueMode};
+        let (len, bars, bar, beat, to_len, to_bars) = self.with(|s| {
+            let (q, to) = (s.seq(), &s.seqs[self.seq_edit.to_seq]);
+            (q.len(), q.bars, q.ticks_per_bar(), q.ticks_per_beat(), to.len(), to.bars)
+        });
+        let e = &mut self.seq_edit;
+        // Times move by bars, or by beats with Shift.
+        let unit = if fine { beat } else { bar } as i64;
+        let time = |v: u32, lo: u32, hi: u32| (v as i64 + d as i64 * unit).clamp(lo as i64, hi as i64) as u32;
+        let num = |v: u32, lo: u32, hi: u32| (v as i64 + d as i64).clamp(lo as i64, hi as i64) as u32;
+        match field {
+            Field::EvOp => {
+                const OPS: [EventOp; 3] = [EventOp::Copy, EventOp::Duration, EventOp::Velocity];
+                let i = OPS.iter().position(|o| *o == e.op).unwrap_or(0) as i32;
+                e.op = OPS[(i + d).rem_euclid(3) as usize];
+                e.value = e.value.min(if e.op == EventOp::Velocity { 127 } else { 9999 });
+            }
+            // −1 stands for ALL, before A01.
+            Field::EvPad => {
+                let v = (e.pad.map_or(-1, |p| p as i32) + d).clamp(-1, PADS as i32 - 1);
+                e.pad = (v >= 0).then_some(v as u8);
+            }
+            Field::EvFrom => e.from = time(e.from, 0, e.to.saturating_sub(1)),
+            Field::EvTo => e.to = time(e.to, e.from + 1, len),
+            Field::EvToSeq => e.to_seq = num(e.to_seq as u32, 0, seq::SEQUENCES as u32 - 1) as usize,
+            Field::EvToTrack => e.to_track = num(e.to_track as u32, 0, seq::TRACKS as u32 - 1) as usize,
+            Field::EvMerge => e.merge ^= true,
+            Field::EvStart => e.start = time(e.start, 0, to_len.saturating_sub(1)),
+            Field::EvCopies => e.copies = num(e.copies, 1, 999),
+            Field::EvMode => {
+                let i = ValueMode::ALL.iter().position(|m| *m == e.mode).unwrap_or(0) as i32;
+                e.mode = ValueMode::ALL[(i + d).rem_euclid(4) as usize];
+            }
+            Field::EvValue => {
+                let max = match (e.mode, e.op) {
+                    (ValueMode::Multiply, _) => 200,
+                    (_, EventOp::Velocity) => 127,
+                    _ => 9999,
+                };
+                e.value = num(e.value, 1, max);
+            }
+            Field::FirstBar => e.first_bar = num(e.first_bar, 1, bars),
+            Field::LastBar => e.last_bar = num(e.last_bar, 1, bars),
+            Field::AfterBar => e.after_bar = num(e.after_bar, 0, to_bars),
+            _ => {}
+        }
+    }
+
+    /// Opens the sequence EDIT screens on the whole current sequence.
+    fn open_seq_edit(&mut self, screen: Screen) {
+        let (seq, track, len, bars) = self.with(|s| (s.t.seq, s.t.track, s.seq().len(), s.seq().bars));
+        let e = &mut self.seq_edit;
+        (e.from, e.to, e.to_seq, e.to_track, e.start) = (0, len, seq, track, 0);
+        (e.first_bar, e.last_bar, e.after_bar) = (1, bars, bars);
+        self.set_screen(screen);
+    }
+
+    /// DO IT on EDIT EVENTS or BARS. The sequence changed can be brought back with UNDO SEQ.
+    fn do_seq_edit(&mut self) {
+        let bars = matches!(self.screen, Screen::Bars);
+        let e = &self.seq_edit;
+        let result = self.with(|s| {
+            if s.t.playing {
+                return Err("Stop first".to_owned());
+            }
+            let (from_seq, track) = (s.t.seq, s.t.track);
+            let to_seq = if bars || e.op == seq::EventOp::Copy { e.to_seq } else { from_seq };
+            let before = s.seqs[to_seq].clone();
+            let len = s.seq().len();
+            let range = e.from.min(len)..e.to.min(len);
+            let done = if bars {
+                let from = s.seq().clone();
+                seq::copy_bars(&from, &mut s.seqs[to_seq], e.first_bar, e.last_bar, e.after_bar, e.copies)?;
+                format!("Bars copied to sequence {:02}", to_seq + 1)
+            } else if e.op == seq::EventOp::Copy {
+                let notes = s.seq().tracks[track].notes.clone();
+                let to = &mut s.seqs[to_seq];
+                let to_len = to.len();
+                seq::copy_events(&notes, range, e.pad, &mut to.tracks[e.to_track], to_len, e.start, e.copies, e.merge);
+                format!("Copied to sequence {:02} track {:02}", to_seq + 1, e.to_track + 1)
+            } else {
+                seq::edit_notes(&mut s.seq_mut().tracks[track], range, e.pad, e.op, e.mode, e.value);
+                format!("Track {:02} edited", track + 1)
+            };
+            s.t.undo = Some((to_seq, before));
+            s.select_seq(to_seq);
+            Ok(done)
+        });
+        match result {
+            Ok(msg) => {
+                self.set_screen(Screen::Main);
+                self.say(msg);
+            }
+            Err(msg) => self.say(msg),
+        }
     }
 
     /// Splits the selected pad's sound into fresh zones when the pad or its length changed.
@@ -974,7 +1118,10 @@ impl App {
                 self.with(|s| s.t.track = (s.t.track + 1).min(seq::TRACKS - 1));
                 self.select_note(0);
             }
-            (Screen::Main, 1) => self.with(|s| s.undo()),
+            (Screen::Main, 1) => self.open_seq_edit(Screen::Events),
+            (Screen::Events, 1) => self.set_screen(Screen::Bars),
+            (Screen::Bars, 0) => self.set_screen(Screen::Events),
+            (Screen::Events | Screen::Bars, 5) => self.do_seq_edit(),
             (Screen::Main, 2) => self.with(|s| {
                 let tr = s.t.track;
                 s.seq_mut().tracks[tr].on ^= true;

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::audio::{RecMode, Shared};
 use crate::program::{Generation, pad_name};
-use crate::seq::TIMING;
+use crate::seq::{EventOp, TIMING, ValueMode};
 
 /// LOAD and SAVE screens: a directory listing of subfolders, and WAV files when loading.
 pub struct Browser {
@@ -46,6 +46,9 @@ pub enum Screen {
     /// The EDIT window, working on the section of the screen it was opened from.
     Edit(Section),
     Step,
+    /// EDIT on the MAIN screen: copying and changing notes (EVENTS) and copying bars (BARS).
+    Events,
+    Bars,
     Sample,
     Song,
     /// NOTE VARIATION assign.
@@ -87,7 +90,8 @@ impl Section {
 impl Screen {
     pub fn soft_keys(&self) -> [&'static str; 6] {
         match self {
-            Screen::Main => ["STEP", "UNDO", "TR.ON", "SOLO", "TR -", "TR +"],
+            Screen::Main => ["STEP", "EDIT", "TR.ON", "SOLO", "TR -", "TR +"],
+            Screen::Events | Screen::Bars => ["EVENTS", "BARS", "", "", "", "DO IT"],
             Screen::Step => ["DELETE", "", "", "", "TR -", "TR +"],
             Screen::Load(_) => ["UP DIR", "SAVE", "", "", "", "DO IT"],
             Screen::Save(_) => ["UP DIR", "", "", "MIDI", "NAME", "DO IT"],
@@ -169,6 +173,41 @@ pub enum Field {
     ZoneEnd,
     EditOp,
     EditTo,
+    EvOp,
+    EvPad,
+    EvFrom,
+    EvTo,
+    EvToSeq,
+    EvToTrack,
+    EvMerge,
+    EvStart,
+    EvCopies,
+    EvMode,
+    EvValue,
+    FirstBar,
+    LastBar,
+    AfterBar,
+}
+
+/// The settings of the sequence EDIT screens, kept between visits like on the MPC.
+pub struct SeqEdit {
+    pub op: EventOp,
+    /// Only this pad's notes, or all.
+    pub pad: Option<u8>,
+    /// Time range in ticks, end excluded.
+    pub from: u32,
+    pub to: u32,
+    pub to_seq: usize,
+    pub to_track: usize,
+    pub merge: bool,
+    pub start: u32,
+    pub copies: u32,
+    pub mode: ValueMode,
+    pub value: u32,
+    /// BARS, counted from 1; `after_bar` 0 inserts before the first bar.
+    pub first_bar: u32,
+    pub last_bar: u32,
+    pub after_bar: u32,
 }
 
 pub struct Seg {
@@ -234,6 +273,7 @@ pub struct View<'a> {
     pub zone: (usize, &'a [usize]),
     /// EDIT: the operation and the pad new sounds go to.
     pub edit: (crate::edit::Op, usize),
+    pub seq_edit: &'a SeqEdit,
 }
 
 /// What the SAMPLE screen shows.
@@ -666,6 +706,76 @@ pub fn rows(v: &View) -> Vec<Row> {
                     vec![t(v.message)],
                 ),
             ]
+        }
+        Screen::Events => {
+            let e = v.seq_edit;
+            let seq = s.seq();
+            let op = match e.op {
+                EventOp::Copy => "COPY",
+                EventOp::Duration => "DURATION",
+                EventOp::Velocity => "VELOCITY",
+            };
+            let mut rows = vec![
+                row(
+                    vec![t("EDIT  Edit:"), f(Field::EvOp, op)],
+                    vec![
+                        t("Sq:"),
+                        f(Field::Seq, format!("{:02}", s.t.seq + 1)),
+                        t(" Tr:"),
+                        f(Field::Track, format!("{:02}", s.t.track + 1)),
+                    ],
+                ),
+                row(
+                    vec![t("Notes:"), f(Field::EvPad, e.pad.map_or("ALL".to_owned(), |p| pad_name(p as usize)))],
+                    vec![],
+                ),
+                row(
+                    vec![t("Time:"), f(Field::EvFrom, seq.bbt(e.from)), t(" - "), f(Field::EvTo, seq.bbt(e.to))],
+                    vec![],
+                ),
+            ];
+            if e.op == EventOp::Copy {
+                rows.push(row(
+                    vec![
+                        t("To sq:"),
+                        f(Field::EvToSeq, format!("{:02}", e.to_seq + 1)),
+                        t(" tr:"),
+                        f(Field::EvToTrack, format!("{:02}", e.to_track + 1)),
+                    ],
+                    vec![t("Mode:"), f(Field::EvMerge, if e.merge { "MERGE" } else { "REPLACE" })],
+                ));
+                rows.push(row(
+                    vec![t("Start:"), f(Field::EvStart, s.seqs[e.to_seq].bbt(e.start))],
+                    vec![t("Copies:"), f(Field::EvCopies, format!("{:3}", e.copies))],
+                ));
+            } else {
+                rows.push(row(vec![t("Mode:"), f(Field::EvMode, e.mode.label())], vec![]));
+                rows.push(row(vec![t("Value:"), f(Field::EvValue, format!("{:4}", e.value))], vec![]));
+            }
+            msg(&mut rows);
+            rows
+        }
+        Screen::Bars => {
+            let e = v.seq_edit;
+            let mut rows = vec![
+                row(vec![t("EDIT BARS  Copy bars")], vec![]),
+                row(
+                    vec![t("From sq:"), f(Field::Seq, format!("{:02}", s.t.seq + 1))],
+                    vec![
+                        t("First bar:"),
+                        f(Field::FirstBar, format!("{:03}", e.first_bar)),
+                        t(" Last bar:"),
+                        f(Field::LastBar, format!("{:03}", e.last_bar)),
+                    ],
+                ),
+                row(
+                    vec![t("To sq:"), f(Field::EvToSeq, format!("{:02}", e.to_seq + 1))],
+                    vec![t("After bar:"), f(Field::AfterBar, format!("{:03}", e.after_bar))],
+                ),
+                row(vec![], vec![t("Copies:"), f(Field::EvCopies, format!("{:3}", e.copies))]),
+            ];
+            msg(&mut rows);
+            rows
         }
         Screen::Edit(section) => {
             let (op, to) = v.edit;
