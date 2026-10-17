@@ -142,13 +142,19 @@ To record:
 
 **REC** erases what is on the track as the playhead passes, and turns into **OVERDUB** after the
 first loop so the new take is kept. Pressing **REC** or **OVERDUB** while playing punches in or out.
-Notes are quantized to `Timing` as they are recorded; **OPEN WINDOW** on the `Timing` field (timing
-correct) quantizes a whole track afterwards.
+Notes are quantized to `Timing` as they are recorded; **OPEN WINDOW** (`Ctrl+Enter`) on the
+`Timing` field (timing correct) quantizes a whole track afterwards.
 
 **UNDO SEQ** (`Ctrl+Z`) takes back the last recording or edit; its light shows that it can.
 Hold **ERASE** (or `Delete`) while playing and hold pads to delete their notes as the playhead
 passes. **TR.ON** (F3) mutes the track, **SOLO** (F4) plays only this track, and **TR -** / **TR +**
 (F5/F6) change track.
+
+**OPEN WINDOW** (`Ctrl+Enter`) on the `Sq` field opens the SEQUENCE window, and on the `Tr` field
+the TRACK window: **NAME** (F5) names the sequence or track (16 characters, `Enter` to keep it,
+`Esc` to cancel), **COPY** (F3) copies it over the one chosen in `Copy to`, **DELETE** (F4) clears
+it, and **CLOSE** (F6) goes back. UNDO SEQ takes back a copy or delete. On `Timing` it opens timing
+correct, as before.
 
 **TRACK MUTE** (`F10`) turns the pads into track switches, for muting parts live: pad 1 mutes or
 unmutes track 1, and so on, with PAD BANK B–D for tracks 17–64. The LCD shows the tracks laid out
@@ -417,6 +423,7 @@ shows the version and the output sample rate.
 | `Ctrl+R` / `Ctrl+O`         | REC / OVERDUB                |
 | `Ctrl+Z`                    | UNDO SEQ                     |
 | `Ctrl+S`                    | Save                         |
+| `Ctrl+Enter`                | OPEN WINDOW                  |
 | `+` / `-`                   | DATA wheel                   |
 | `Delete` (hold)             | ERASE                        |
 | `T`                         | TAP TEMPO (stopped), NOTE REPEAT (held while playing) |

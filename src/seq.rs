@@ -21,6 +21,8 @@ pub struct Note {
 
 #[derive(Clone, Debug)]
 pub struct Track {
+    /// Empty for the default "Track-NN".
+    pub name: String,
     pub on: bool,
     /// MIDI channel (0..16) the track's notes are sent on, if any.
     pub out: Option<u8>,
@@ -29,8 +31,8 @@ pub struct Track {
 }
 
 impl Track {
-    fn new() -> Self {
-        Self { on: true, out: None, notes: Vec::new() }
+    pub fn new() -> Self {
+        Self { name: String::new(), on: true, out: None, notes: Vec::new() }
     }
 
     pub fn insert(&mut self, note: Note) {
@@ -53,6 +55,8 @@ impl Track {
 
 #[derive(Clone, Debug)]
 pub struct Sequence {
+    /// Empty for the default "SequenceNN".
+    pub name: String,
     pub tempo: f32,
     pub bars: u32,
     pub beats: u32,
@@ -65,6 +69,7 @@ pub struct Sequence {
 impl Default for Sequence {
     fn default() -> Self {
         Self {
+            name: String::new(),
             tempo: 120.0,
             bars: 2,
             beats: 4,
@@ -109,6 +114,15 @@ impl Sequence {
         let (bar, rest) = (tick / self.ticks_per_bar(), tick % self.ticks_per_bar());
         format!("{:03}.{:02}.{:02}", bar + 1, rest / self.ticks_per_beat() + 1, rest % self.ticks_per_beat())
     }
+}
+
+/// A sequence's name as the LCD shows it: its own, or "SequenceNN" (counted from 1).
+pub fn seq_name(index: usize, seq: &Sequence) -> String {
+    if seq.name.is_empty() { format!("Sequence{:02}", index + 1) } else { seq.name.clone() }
+}
+
+pub fn track_name(index: usize, track: &Track) -> String {
+    if track.name.is_empty() { format!("Track-{:02}", index + 1) } else { track.name.clone() }
 }
 
 /// EDIT BARS: inserts `copies` copies of bars `first..=last` (counted from 1) of `from` into `to`

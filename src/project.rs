@@ -105,6 +105,8 @@ struct SoundFile {
 #[derive(Serialize, Deserialize)]
 struct SeqFile {
     index: usize,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    name: String,
     tempo: f32,
     bars: u32,
     beats: u32,
@@ -116,6 +118,8 @@ struct SeqFile {
 #[derive(Serialize, Deserialize)]
 struct TrackFile {
     index: usize,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    name: String,
     on: bool,
     #[serde(default)]
     out: Option<u8>,
@@ -159,9 +163,10 @@ fn describe(s: &Shared) -> ProjectFile {
                 .tracks
                 .iter()
                 .enumerate()
-                .filter(|(_, t)| !t.on || t.out.is_some() || !t.notes.is_empty())
+                .filter(|(_, t)| !t.on || t.out.is_some() || !t.notes.is_empty() || !t.name.is_empty())
                 .map(|(index, t)| TrackFile {
                     index,
+                    name: t.name.clone(),
                     on: t.on,
                     out: t.out,
                     notes: t
@@ -179,10 +184,12 @@ fn describe(s: &Shared) -> ProjectFile {
                 })
                 .collect();
             let changed = !tracks.is_empty()
+                || !q.name.is_empty()
                 || (q.tempo, q.bars, q.beats, q.beat_unit, q.looping)
                     != (fresh.tempo, fresh.bars, fresh.beats, fresh.beat_unit, fresh.looping);
             changed.then_some(SeqFile {
                 index,
+                name: q.name.clone(),
                 tempo: q.tempo,
                 bars: q.bars,
                 beats: q.beats,
@@ -366,6 +373,7 @@ pub fn load(root: &Path, rate: u32) -> Result<Loaded, String> {
     let mut seqs: Vec<Sequence> = (0..SEQUENCES).map(|_| Sequence::default()).collect();
     for q in std::mem::take(&mut file.sequences) {
         let Some(seq) = seqs.get_mut(q.index) else { continue };
+        seq.name = q.name.chars().take(16).collect();
         seq.tempo = q.tempo.clamp(30.0, 300.0);
         seq.looping = q.looping;
         seq.set_signature(q.beats, if [2, 4, 8, 16].contains(&q.beat_unit) { q.beat_unit } else { 4 });
@@ -373,6 +381,7 @@ pub fn load(root: &Path, rate: u32) -> Result<Loaded, String> {
         let len = seq.len();
         for t in q.tracks.into_iter().filter(|t| t.index < TRACKS) {
             let track = &mut seq.tracks[t.index];
+            track.name = t.name.chars().take(16).collect();
             track.on = t.on;
             track.out = t.out.filter(|ch| *ch < 16);
             for n in t.notes {

@@ -148,6 +148,9 @@ struct App {
     seq_edit: lcd::SeqEdit,
     /// The pads as they were before the last sound edit, for UNDO SEQ on the TRIM screens.
     sound_undo: Option<Vec<(usize, program::Pad)>>,
+    /// The sequence or track name being typed in their window.
+    name_buf: String,
+    copy_to: usize,
 }
 
 enum Export {
@@ -180,6 +183,7 @@ enum Action {
     SixteenLevels,
     NextSeq,
     TrackMute,
+    OpenWindow,
 }
 
 impl App {
@@ -257,6 +261,8 @@ impl App {
             edit_to: 16,
             edit_ratio: 1000,
             sound_undo: None,
+            name_buf: String::new(),
+            copy_to: 1,
             seq_edit: lcd::SeqEdit {
                 op: seq::EventOp::Copy,
                 pad: None,
@@ -410,7 +416,7 @@ impl App {
             pad: self.pad,
             velocity: self.velocity,
             message: &self.message,
-            name: &self.save_name,
+            name: if self.in_window() { &self.name_buf } else { &self.save_name },
             editing: self.editing_name,
             step: self.step,
             song_step: self.song_step,
@@ -420,6 +426,7 @@ impl App {
             seq_edit: &self.seq_edit,
             levels: (self.levels_pad, self.levels_var, self.levels_key),
             bank: self.bank,
+            copy_to: self.copy_to,
             out_port: &self.midi_out.port,
             sample: self.input.as_ref().map(|input| {
                 let c = input.lock();
@@ -546,6 +553,10 @@ impl App {
             Field::EditRatio => {
                 let by = if fine { d } else { d * 10 };
                 return self.edit_ratio = (self.edit_ratio as i32 + by).clamp(500, 2000) as u32;
+            }
+            Field::CopyTo => {
+                let max = if matches!(self.screen, Screen::SeqWin) { seq::SEQUENCES } else { seq::TRACKS };
+                return self.copy_to = (self.copy_to as i32 + d).clamp(0, max as i32 - 1) as usize;
             }
             Field::OutPort => {
                 let choices = midi::MidiOut::choices();
@@ -785,7 +796,8 @@ impl App {
                 | Field::LevelsType
                 | Field::LevelsKey
                 | Field::OutPort
-                | Field::EditRatio => {}
+                | Field::EditRatio
+                | Field::CopyTo => {}
             }
         });
     }
@@ -1344,25 +1356,113 @@ impl App {
 
     /// Typing the project name: letters go to the name instead of the pads.
     fn type_name(&mut self, events: &[egui::Event]) {
+        let window = self.in_window();
+        // The MPC allows 16 characters for sequence and track names.
+        let (buf, max) = if window { (&mut self.name_buf, 16) } else { (&mut self.save_name, 40) };
+        let mut done = false;
         for e in events {
             match e {
                 egui::Event::Text(text) => {
                     if std::mem::take(&mut self.replace_name) {
-                        self.save_name.clear();
+                        buf.clear();
                     }
                     let allowed = text.chars().filter(|c| c.is_alphanumeric() || " -_.()".contains(*c));
-                    self.save_name.extend(allowed);
-                    self.save_name
-                        .truncate(self.save_name.char_indices().nth(40).map_or(self.save_name.len(), |(i, _)| i));
+                    buf.extend(allowed);
+                    buf.truncate(buf.char_indices().nth(max).map_or(buf.len(), |(i, _)| i));
                 }
                 egui::Event::Key { key: Key::Backspace, pressed: true, .. } => {
                     self.replace_name = false;
-                    self.save_name.pop();
+                    buf.pop();
                 }
-                egui::Event::Key { key: Key::Enter | Key::Escape, pressed: true, .. } => self.editing_name = false,
+                egui::Event::Key { key: Key::Escape, pressed: true, .. } => self.editing_name = false,
+                egui::Event::Key { key: Key::Enter, pressed: true, .. } => {
+                    self.editing_name = false;
+                    done = true;
+                }
                 _ => {}
             }
         }
+        if done && window {
+            self.commit_name();
+        }
+    }
+
+    fn in_window(&self) -> bool {
+        matches!(self.screen, Screen::SeqWin | Screen::TrWin)
+    }
+
+    fn commit_name(&mut self) {
+        let name = self.name_buf.trim().to_owned();
+        let seq_win = matches!(self.screen, Screen::SeqWin);
+        self.with(|s| {
+            let (cur, tr) = (s.t.seq, s.t.track);
+            let seq = s.seq_mut();
+            // The default name is kept as empty, so it follows the number.
+            if seq_win {
+                seq.name = name;
+                if seq::seq_name(cur, &seq::Sequence::default()) == seq.name {
+                    seq.name.clear();
+                }
+            } else {
+                let track = &mut seq.tracks[tr];
+                track.name = name;
+                if seq::track_name(tr, &seq::Track::new()) == track.name {
+                    track.name.clear();
+                }
+            }
+        });
+    }
+
+    /// OPEN WINDOW: the window of the field under the cursor.
+    fn open_window(&mut self) {
+        let fields = self.fields();
+        match fields.get(self.focus).map(|f| f.1) {
+            Some(Field::Timing | Field::Swing) => self.timing_correct(),
+            Some(Field::Seq) if matches!(self.screen, Screen::Main) => {
+                self.copy_to = self.with(|s| (s.t.seq + 1) % seq::SEQUENCES);
+                self.set_screen(Screen::SeqWin);
+            }
+            Some(Field::Track | Field::TrackOn | Field::TrackOut) => {
+                self.copy_to = self.with(|s| (s.t.track + 1) % seq::TRACKS);
+                self.set_screen(Screen::TrWin);
+            }
+            _ => self.say("No window for this field"),
+        }
+    }
+
+    /// COPY and DELETE in the SEQUENCE and TRACK windows; UNDO SEQ takes them back.
+    fn window_edit(&mut self, delete: bool) {
+        let (seq_win, to) = (matches!(self.screen, Screen::SeqWin), self.copy_to);
+        let msg = self.with(|s| {
+            if s.t.playing {
+                return "Stop first".to_owned();
+            }
+            let (cur, tr) = (s.t.seq, s.t.track);
+            match (seq_win, delete) {
+                (true, true) => {
+                    s.checkpoint();
+                    *s.seq_mut() = seq::Sequence::default();
+                    format!("Sequence {:02} cleared", cur + 1)
+                }
+                (true, false) => {
+                    s.t.undo = Some((to, s.seqs[to].clone()));
+                    s.seqs[to] = s.seq().clone();
+                    format!("Copied to sequence {:02}", to + 1)
+                }
+                (false, true) => {
+                    s.checkpoint();
+                    s.seq_mut().tracks[tr] = seq::Track::new();
+                    format!("Track {:02} cleared", tr + 1)
+                }
+                (false, false) => {
+                    s.checkpoint();
+                    let track = s.seq().tracks[tr].clone();
+                    s.seq_mut().tracks[to] = track;
+                    format!("Copied to track {:02}", to + 1)
+                }
+            }
+        });
+        self.say(msg);
     }
 
     fn soft_key(&mut self, i: usize) {
@@ -1421,6 +1521,20 @@ impl App {
             (Screen::Punch, 5) => self.with(|s| s.t.punch.on ^= true),
             (Screen::Trans, 5) => self.with(|s| s.t.transpose.0 ^= true),
             (Screen::SecondSeq, 5) => self.with(|s| s.t.second.0 ^= true),
+            (Screen::SeqWin | Screen::TrWin, 2) => self.window_edit(false),
+            (Screen::SeqWin | Screen::TrWin, 3) => self.window_edit(true),
+            (Screen::SeqWin | Screen::TrWin, 4) => {
+                self.name_buf = self.with(|s| {
+                    let (seq, tr) = (s.t.seq, s.t.track);
+                    if matches!(self.screen, Screen::SeqWin) {
+                        seq::seq_name(seq, s.seq())
+                    } else {
+                        seq::track_name(tr, &s.seq().tracks[tr])
+                    }
+                });
+                (self.editing_name, self.replace_name) = (true, true);
+            }
+            (Screen::SeqWin | Screen::TrWin, 5) => self.set_screen(Screen::Main),
             (Screen::TrMute { .. }, 5) => {
                 if self.with(|s| s.t.solo.take().is_none()) {
                     self.screen = Screen::TrMute { solo: true };
@@ -1723,6 +1837,7 @@ impl App {
             Action::FullLevel => self.full_level ^= true,
             Action::SixteenLevels => self.toggle_sixteen_levels(),
             Action::NextSeq => self.toggle_mode(Screen::NextSeq),
+            Action::OpenWindow => self.open_window(),
             Action::TrackMute => self.toggle_mode(Screen::TrMute { solo: false }),
         }
     }
@@ -1775,6 +1890,7 @@ impl App {
                 Key::ArrowDown => Action::Cursor(0, 1),
                 Key::Plus | Key::Equals => Action::Data(1),
                 Key::Minus => Action::Data(-1),
+                Key::Enter if modifiers.ctrl => Action::OpenWindow,
                 Key::Enter => Action::Enter,
                 Key::Escape => Action::Main,
                 Key::Backspace => Action::Back,
@@ -2080,11 +2196,7 @@ impl App {
         }
         p.label(painter, 398.0, 262.0, "OPEN WINDOW", 7.0);
         if key(ui, p, p.rect(382.0, 271.0, 32.0, 15.0), &ORANGE, "", false).clicked() {
-            let fields = self.fields();
-            match fields.get(self.focus).map(|f| f.1) {
-                Some(Field::Timing | Field::Swing) => self.timing_correct(),
-                _ => self.say("No window for this field"),
-            }
+            self.open_window();
         }
 
         p.label(painter, 350.0, 304.0, "DATA", 9.0);

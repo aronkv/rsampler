@@ -65,6 +65,9 @@ pub enum Screen {
     },
     /// NEXT SEQ: the pads pick the next sequence.
     NextSeq,
+    /// OPEN WINDOW on the sequence and track fields: name, copy, delete.
+    SeqWin,
+    TrWin,
     /// MISC: PUNCH, TRANS and 2ND SEQ.
     Punch,
     Trans,
@@ -122,6 +125,7 @@ impl Screen {
                 ["", "", "", "", "", ""]
             }
             Screen::TrMute { .. } => ["", "", "", "", "", "SOLO"],
+            Screen::SeqWin | Screen::TrWin => ["", "", "COPY", "DELETE", "NAME", "CLOSE"],
             Screen::Punch | Screen::Trans | Screen::SecondSeq => ["PUNCH", "TRANS", "2ND SEQ", "", "", "ON/OFF"],
         }
     }
@@ -227,6 +231,7 @@ pub enum Field {
     TransTrack,
     TransAmount,
     SecondSeq,
+    CopyTo,
 }
 
 /// The settings of the sequence EDIT screens, kept between visits like on the MPC.
@@ -315,6 +320,8 @@ pub struct View<'a> {
     /// percent.
     pub edit: (crate::edit::Op, usize, u32),
     pub seq_edit: &'a SeqEdit,
+    /// SEQUENCE and TRACK windows: where COPY copies to.
+    pub copy_to: usize,
     /// Selected PAD BANK, 0..4.
     pub bank: usize,
     /// The MIDI out port.
@@ -370,7 +377,10 @@ pub fn rows(v: &View) -> Vec<Row> {
             let swing = TIMING[s.t.timing].1;
             let mut rows = vec![
                 row(
-                    vec![f(Field::Seq, format!("Sq:{:02}", s.t.seq + 1)), t(format!("-Sequence{:02}", s.t.seq + 1))],
+                    vec![
+                        f(Field::Seq, format!("Sq:{:02}", s.t.seq + 1)),
+                        t(format!("-{}", crate::seq::seq_name(s.t.seq, seq))),
+                    ],
                     vec![t("Now:"), f(Field::Now, seq.bbt(s.now()))],
                 ),
                 row(
@@ -414,7 +424,7 @@ pub fn rows(v: &View) -> Vec<Row> {
                     vec![
                         t("Tr:"),
                         f(Field::Track, format!("{:02}", tr + 1)),
-                        t(format!("-Track-{:02}", tr + 1)),
+                        t(format!("-{}", crate::seq::track_name(tr, track))),
                         t("  On:"),
                         f(Field::TrackOn, if track.on { "YES" } else { "NO" }),
                         t("  Out:"),
@@ -565,6 +575,56 @@ pub fn rows(v: &View) -> Vec<Row> {
             }
             rows
         }
+        Screen::SeqWin | Screen::TrWin => {
+            use crate::seq::{seq_name, track_name};
+            let seq_win = matches!(v.screen, Screen::SeqWin);
+            let cursor = if v.editing { "_" } else { "" };
+            let name = if v.editing {
+                format!("{}{cursor}", v.name)
+            } else if seq_win {
+                seq_name(s.t.seq, s.seq())
+            } else {
+                track_name(s.t.track, &s.seq().tracks[s.t.track])
+            };
+            let target = if seq_win {
+                let used = if s.seqs[v.copy_to].tracks.iter().any(|t| !t.notes.is_empty()) { "" } else { " (unused)" };
+                format!("-{}{used}", seq_name(v.copy_to, &s.seqs[v.copy_to]))
+            } else {
+                format!("-{}", track_name(v.copy_to, &s.seq().tracks[v.copy_to]))
+            };
+            let mut rows = vec![
+                if seq_win {
+                    row(vec![t("SEQUENCE  Sq:"), f(Field::Seq, format!("{:02}", s.t.seq + 1))], vec![])
+                } else {
+                    row(
+                        vec![
+                            t(format!("TRACK  Sq:{:02}  Tr:", s.t.seq + 1)),
+                            f(Field::Track, format!("{:02}", s.t.track + 1)),
+                        ],
+                        vec![],
+                    )
+                },
+                row(vec![t(format!("Name:{name}"))], vec![t(if v.editing { "ENTER: done  ESC: cancel" } else { "" })]),
+                row(
+                    vec![
+                        t(if seq_win { "Copy to sq:" } else { "Copy to tr:" }),
+                        f(Field::CopyTo, format!("{:02}", v.copy_to + 1)),
+                        t(target),
+                    ],
+                    vec![],
+                ),
+                row(
+                    vec![t(if seq_win {
+                        "COPY replaces it; DELETE clears this one"
+                    } else {
+                        "COPY replaces it; DELETE clears this track"
+                    })],
+                    vec![],
+                ),
+            ];
+            msg(&mut rows);
+            rows
+        }
         Screen::Punch => {
             use crate::audio::PunchMode;
             let p = s.t.punch;
@@ -614,7 +674,7 @@ pub fn rows(v: &View) -> Vec<Row> {
                     vec![
                         t("2ND SEQUENCE  Sq:"),
                         f(Field::SecondSeq, format!("{:02}", sq + 1)),
-                        t(format!("-Sequence{:02}{used}", sq + 1)),
+                        t(format!("-{}{used}", crate::seq::seq_name(sq, &s.seqs[sq]))),
                     ],
                     vec![t(format!("2nd seq:{}", on_off(on)))],
                 ),
@@ -718,10 +778,15 @@ pub fn rows(v: &View) -> Vec<Row> {
                     vec![
                         t(format!("{current}{:02} ", i + 1)),
                         f(Field::SongSeq, format!("Sq:{:02}", seq + 1)),
-                        t(format!("-Sequence{:02}{used}", seq + 1)),
+                        t(format!("-{}{used}", crate::seq::seq_name(seq, &s.seqs[seq]))),
                     ]
                 } else {
-                    vec![t(format!("{current}{:02} Sq:{:02}-Sequence{:02}{used}", i + 1, seq + 1, seq + 1))]
+                    vec![t(format!(
+                        "{current}{:02} Sq:{:02}-{}{used}",
+                        i + 1,
+                        seq + 1,
+                        crate::seq::seq_name(seq, &s.seqs[seq])
+                    ))]
                 };
                 let right = if i == v.song_step {
                     vec![t("Reps:"), f(Field::SongReps, reps.to_string())]

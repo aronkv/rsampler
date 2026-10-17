@@ -30,6 +30,8 @@ pub struct AllNote {
 
 pub struct AllSeq {
     pub index: usize,
+    pub name: String,
+    pub track_names: Vec<String>,
     pub tempo: f32,
     pub bars: u32,
     pub signature: (u32, u32),
@@ -114,8 +116,12 @@ pub fn parse(b: &[u8]) -> Result<All, String> {
         for (t, on) in on.iter_mut().enumerate() {
             *on = s[TRACK_STATUS_AT + t] >> 1 & 1 == 1;
         }
+        let text =
+            |b: &[u8]| String::from_utf8_lossy(b.split(|c| *c == 0).next().unwrap_or_default()).trim().to_owned();
         seqs.push(AllSeq {
             index,
+            name: text(&b[at - 16..at]),
+            track_names: (0..64).map(|t| text(&s[384 + t * 16..384 + (t + 1) * 16])).collect(),
             tempo: u16_at(s, 22) as f32 / 10.0,
             bars: (u16_at(s, 26) as u32).clamp(1, 999),
             signature,
@@ -134,6 +140,15 @@ impl AllSeq {
     /// dropped and counted.
     pub fn to_sequence(&self, pad_of: impl Fn(u8) -> Option<u8>) -> (Sequence, usize) {
         let mut seq = Sequence { tempo: self.tempo.clamp(30.0, 300.0), looping: self.looping, ..Sequence::default() };
+        // Names the MPC gives by default stay empty, so they follow the sequence's number.
+        if self.name != format!("Sequence{:02}", self.index + 1) {
+            seq.name = self.name.chars().take(16).collect();
+        }
+        for (i, (t, name)) in seq.tracks.iter_mut().zip(&self.track_names).enumerate() {
+            if *name != format!("Track-{:02}", i + 1) {
+                t.name = name.chars().take(16).collect();
+            }
+        }
         seq.set_signature(self.signature.0, self.signature.1);
         seq.set_bars(self.bars);
         for (t, on) in seq.tracks.iter_mut().zip(self.on) {
