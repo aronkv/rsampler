@@ -14,9 +14,10 @@
 
 <p align="center">A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.</p>
 
-> **Status:** early development, but usable: pads, programs, mixer, trimming, a 99-sequence,
-> 64-track sequencer, song mode, step editing, sampling from the input, MIDI in, out and clock,
-> and project saving all work. See [Not there yet](#not-there-yet) for what is missing.
+> **Status:** usable and close to the MPC2000XL: 24 programs on four DRUM buses, chopping,
+> sound editing, effects, a 99-sequence, 64-track sequencer with MIDI tracks, song mode, step and
+> bar editing, sampling from the input, MIDI in, out and clock, the MPC's own files, WAV export and
+> project saving all work.
 
 ## Goals
 
@@ -29,8 +30,10 @@
 
 ## Platforms
 
-Linux first. Windows builds are published too but get less testing; MIDI output is Linux-only
-for now.
+Linux and Windows, from the same code. It is developed on Linux; the Windows build was tested on
+Windows 11 (sound, keyboard pads on a Hungarian layout, recording, files, WAV and MIDI export, MIDI
+out to the built-in GS Wavetable Synth). On Windows there is no own `rsampler` MIDI port, since
+Windows has no virtual MIDI ports; choose an output in SETUP instead.
 
 ## Install
 
@@ -467,10 +470,6 @@ shows the version and the output sample rate.
 | `F9` / `F10`                | NEXT SEQ / TRACK MUTE        |
 | `Ctrl+1`–`9`                | SONG, MISC, LOAD, SAMPLE, TRIM, PROGRAM, SETUP, MIXER, OTHER |
 | `Esc`                       | MAIN SCREEN                  |
-
-### Not there yet
-
-- Windows-specific testing
 
 ## Reference
 
