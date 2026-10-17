@@ -98,6 +98,16 @@ impl VarParam {
 /// A NOTE VARIATION slider position (0..=127) applied to one hit.
 pub type Variation = Option<(VarParam, u8)>;
 
+/// The MPC's filter envelope: the filter opens by `amount` over `attack`, then closes back over
+/// `decay`, each 0..=100.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FilterEnv {
+    pub attack: u32,
+    pub decay: u32,
+    pub amount: u32,
+}
+
 /// The MPC's VELOCITY MODULATION: how much a softer hit changes the sound, each 0..=100.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(default)]
@@ -155,6 +165,7 @@ pub struct Pad {
     /// VEL SW: a velocity above `switch[i]` plays `also[i]` (the higher one wins).
     pub switch: [u8; 2],
     pub velo: Velo,
+    pub fenv: FilterEnv,
 }
 
 impl Default for Pad {
@@ -176,6 +187,7 @@ impl Default for Pad {
             also: [None, None],
             switch: [64, 100],
             velo: Velo::default(),
+            fenv: FilterEnv::default(),
         }
     }
 }
@@ -218,6 +230,7 @@ impl Pad {
             also: self.also,
             switch: self.switch,
             velo: self.velo,
+            fenv: self.fenv,
         };
         if let Some((param, v)) = var {
             let scaled = v.min(127) as u32 * 100 / 127;

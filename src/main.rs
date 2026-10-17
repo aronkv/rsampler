@@ -696,6 +696,9 @@ impl App {
                 Field::VeloAttack => p.velo.attack = step(p.velo.attack, 0, 100),
                 Field::VeloStart => p.velo.start = step(p.velo.start, 0, 100),
                 Field::VeloFilter => p.velo.filter = step(p.velo.filter, 0, 100),
+                Field::EnvAttack => p.fenv.attack = step(p.fenv.attack, 0, 100),
+                Field::EnvDecay => p.fenv.decay = step(p.fenv.decay, 0, 100),
+                Field::EnvAmount => p.fenv.amount = step(p.fenv.amount, 0, 100),
                 Field::Pan => p.pan = (p.pan + d).clamp(-50, 50),
                 Field::Start | Field::End | Field::LoopTo | Field::LoopLen | Field::Looping => {
                     if let Some(snd) = &mut p.sound {

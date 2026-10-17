@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use crate::program::{Generation, Overlap, PADS, Pad, Velo};
+use crate::program::{FilterEnv, Generation, Overlap, PADS, Pad, Velo};
 use crate::snd;
 
 /// The MPC numbers its 64 drum notes 35–98; 34 (or 0) means "none".
@@ -32,6 +32,7 @@ pub struct NoteParams {
     pub also: [Option<usize>; 2],
     pub switch: [u8; 2],
     pub velo: Velo,
+    pub fenv: FilterEnv,
 }
 
 pub struct Pgm {
@@ -96,6 +97,11 @@ pub fn parse(b: &[u8]) -> Result<Pgm, String> {
                     attack: q[20].min(100) as u32,
                     start: q[21].min(100) as u32,
                     filter: q[22].min(100) as u32,
+                },
+                fenv: FilterEnv {
+                    attack: q[16].min(100) as u32,
+                    decay: q[17].min(100) as u32,
+                    amount: q[18].min(100) as u32,
                 },
             };
             Some((n, params))
@@ -164,6 +170,7 @@ pub fn load(path: &Path, rate: u32) -> Result<Loaded, String> {
             also: q.also.map(|m| m.and_then(pad_of_note).map(|p| p as u8)),
             switch: q.switch,
             velo: q.velo,
+            fenv: q.fenv,
         });
     }
     let mut note_pads = [None; 64];
@@ -204,6 +211,7 @@ mod tests {
                 q[8] = 34;
                 q[9..11].copy_from_slice(&(-30i16).to_le_bytes());
                 (q[11], q[12], q[13], q[14], q[15]) = (4, 20, 1, 60, 15);
+                (q[16], q[17], q[18]) = (5, 50, 40);
                 (q[19], q[20], q[21], q[22]) = (70, 10, 20, 30);
             }
             b.extend(q);
@@ -244,6 +252,7 @@ mod tests {
                 also: [Some(1), None],
                 switch: [44, 0],
                 velo: Velo { level: 70, attack: 10, start: 20, filter: 30 },
+                fenv: FilterEnv { attack: 5, decay: 50, amount: 40 },
             }
         );
         assert_eq!(pgm.pads[1].as_ref().unwrap().1.sound.as_deref(), Some("KICK"));

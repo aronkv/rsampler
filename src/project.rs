@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::audio::{Shared, Song, load_wav};
-use crate::program::{Frames, Generation, Overlap, PADS, Pad, Sound, VarParam, Velo, pad_name};
+use crate::program::{FilterEnv, Frames, Generation, Overlap, PADS, Pad, Sound, VarParam, Velo, pad_name};
 use crate::seq::{Note, SEQUENCES, Sequence, TIMING, TRACKS};
 
 pub const FILE: &str = "rsampler.json";
@@ -79,6 +79,8 @@ struct PadFile {
     switch: [u8; 2],
     #[serde(default)]
     velo: Velo,
+    #[serde(default)]
+    fenv: FilterEnv,
 }
 
 fn default_switch() -> [u8; 2] {
@@ -231,6 +233,7 @@ fn pad_file(pad: usize, p: &Pad, sound: Option<SoundFile>) -> PadFile {
         also: p.also,
         switch: p.switch,
         velo: p.velo,
+        fenv: p.fenv,
     }
 }
 
@@ -351,6 +354,11 @@ pub fn load(root: &Path, rate: u32) -> Result<Loaded, String> {
                 attack: p.velo.attack.min(100),
                 start: p.velo.start.min(100),
                 filter: p.velo.filter.min(100),
+            },
+            fenv: FilterEnv {
+                attack: p.fenv.attack.min(100),
+                decay: p.fenv.decay.min(100),
+                amount: p.fenv.amount.min(100),
             },
         };
     }

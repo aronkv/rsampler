@@ -224,8 +224,8 @@ Open it with the blue **6 / PROGRAM** key. Hit a pad (or change `Pad`) to choose
 
 **CLEAR** (F6) removes the pad's sound.
 
-**VELO** (F4) opens the VELOCITY MODULATION window: how much the strength of a hit shapes the
-sound, each 0–100, for expressive playing from MIDI pads:
+**VELO** (F4) opens the VELO/ENV window. Its first part is velocity modulation: how much the
+strength of a hit shapes the sound, each 0–100, for expressive playing from MIDI pads:
 
 | Field         | What it does                                                         |
 | ------------- | -------------------------------------------------------------------- |
@@ -234,7 +234,9 @@ sound, each 0–100, for expressive playing from MIDI pads:
 | `Velo>Start`  | Softer hits start later into the sound, skipping the sharp beginning |
 | `Velo>Filter` | Harder hits open the filter further (set `Filter` below 100 first)   |
 
-**PROGRAM** (F1) goes back.
+Below it is the FILTER ENVELOPE: on each hit the filter opens by `Amount` over `Attack`, then
+closes back to `Filter` over `Decay` (each 0–100, up to five seconds), the classic sweep of a
+filtered bass or a "wah" on a drum. It needs `Filter` below 100. **PROGRAM** (F1) goes back.
 
 ### MIXER
 
@@ -301,8 +303,8 @@ directly.
 
 An MPC2000XL program (`.PGM`) loads onto all 64 pads at once (press `Enter` twice): each pad gets
 its sound from the `.SND` files next to the program, with the program's tuning, envelope, filter,
-overlap, mute assign, SIMULT / VEL SW mode, velocity modulation, level and pan. Sounds that are not
-there are listed on the LCD. The MPC's filter envelope is not carried over yet.
+overlap, mute assign, SIMULT / VEL SW mode, velocity modulation, filter envelope, level and pan.
+Sounds that are not there are listed on the LCD.
 
 ### SAMPLE: recording from the input
 
@@ -410,7 +412,6 @@ shows the version and the output sample rate.
 - Windows-specific testing
 - The MISC mode
 - INSERT SOUND in the EDIT window
-- The filter envelope in PROGRAM
 - Loading the MPC's `.SEQ`, `.APS` and `.ALL` files; its `.SND` sounds, `.PGM` programs and
   `.MID` sequences already load
 

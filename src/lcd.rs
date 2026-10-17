@@ -211,6 +211,9 @@ pub enum Field {
     VeloFilter,
     OutPort,
     EditRatio,
+    EnvAttack,
+    EnvDecay,
+    EnvAmount,
 }
 
 /// The settings of the sequence EDIT screens, kept between visits like on the MPC.
@@ -550,14 +553,30 @@ pub fn rows(v: &View) -> Vec<Row> {
             rows
         }
         Screen::Velo => {
-            let velo = s.pads[v.pad].velo;
+            let (velo, env) = (s.pads[v.pad].velo, s.pads[v.pad].fenv);
             let num = |field, v: u32| f(field, format!("{v:3}"));
             let mut rows = vec![
-                row(vec![t("VELOCITY MODULATION  Pad:"), f(Field::Pad, pad_name(v.pad))], vec![t(sound_name(v))]),
-                row(vec![t("Velo>Level: "), num(Field::VeloLevel, velo.level)], vec![t("softer is quieter")]),
-                row(vec![t("Velo>Attack:"), num(Field::VeloAttack, velo.attack)], vec![t("softer fades in slower")]),
-                row(vec![t("Velo>Start: "), num(Field::VeloStart, velo.start)], vec![t("softer starts later")]),
-                row(vec![t("Velo>Filter:"), num(Field::VeloFilter, velo.filter)], vec![t("harder opens the filter")]),
+                row(vec![t("VELO/ENV  Pad:"), f(Field::Pad, pad_name(v.pad))], vec![t(sound_name(v))]),
+                row(
+                    vec![t("Velo>Level: "), num(Field::VeloLevel, velo.level)],
+                    vec![t("Velo>Attack:"), num(Field::VeloAttack, velo.attack)],
+                ),
+                row(
+                    vec![t("Velo>Start: "), num(Field::VeloStart, velo.start)],
+                    vec![t("Velo>Filter:"), num(Field::VeloFilter, velo.filter)],
+                ),
+                row(vec![t(format!("FILTER ENVELOPE  (Filter:{})", s.pads[v.pad].cutoff))], vec![]),
+                row(
+                    vec![
+                        t("Attack:"),
+                        num(Field::EnvAttack, env.attack),
+                        t("  Decay:"),
+                        num(Field::EnvDecay, env.decay),
+                        t("  Amount:"),
+                        num(Field::EnvAmount, env.amount),
+                    ],
+                    vec![],
+                ),
             ];
             msg(&mut rows);
             rows

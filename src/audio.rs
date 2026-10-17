@@ -673,10 +673,17 @@ struct Svf {
 
 impl Svf {
     fn new(cutoff_hz: f32, resonance: f32, rate: f32) -> Self {
+        let mut f = Self { a1: 0.0, a2: 0.0, a3: 0.0, ic: [[0.0; 2]; 2] };
+        f.tune(cutoff_hz, resonance, rate);
+        f
+    }
+
+    /// Moves the cutoff, keeping the filter's state so a sweep has no clicks.
+    fn tune(&mut self, cutoff_hz: f32, resonance: f32, rate: f32) {
         let g = (PI * cutoff_hz.min(rate * 0.45) / rate).tan();
         let k = 2.0 - 1.9 * resonance;
-        let a1 = 1.0 / (1.0 + g * (g + k));
-        Self { a1, a2: g * a1, a3: g * g * a1, ic: [[0.0; 2]; 2] }
+        self.a1 = 1.0 / (1.0 + g * (g + k));
+        (self.a2, self.a3) = (g * self.a1, g * g * self.a1);
     }
 
     fn process(&mut self, ch: usize, x: f32) -> f32 {
@@ -709,7 +716,27 @@ struct Voice {
     /// Short fade when cut off by a MONO retrigger, a mute assign or voice stealing.
     cut: Option<u32>,
     filter: Option<Svf>,
+    sweep: Option<Sweep>,
 }
+
+/// A filter envelope in motion: the cutoff (0..=100) rises by `amount` over `attack` frames, then
+/// falls back over `decay` frames.
+struct Sweep {
+    base: f32,
+    amount: f32,
+    attack: f32,
+    decay: f32,
+    resonance: f32,
+    rate: f32,
+}
+
+/// Cutoff 0..=100 to Hz, 20 Hz to 20 kHz evenly in pitch.
+fn cutoff_hz(cutoff: f32) -> f32 {
+    20.0 * 1000f32.powf(cutoff / 100.0)
+}
+
+/// Frames between filter envelope updates.
+const SWEEP_STEP: u32 = 32;
 
 const CUT_FRAMES: u32 = 128;
 /// Voice owner for PLAY X, which is no pad.
@@ -750,6 +777,13 @@ impl Voice {
         let a = self.frames[i];
         let b = self.frames.get(i + 1).copied().unwrap_or(a);
         let g = self.level();
+        if let (Some(s), Some(f)) = (&self.sweep, &mut self.filter)
+            && self.age.is_multiple_of(SWEEP_STEP)
+        {
+            let t = self.age as f32;
+            let env = if t < s.attack { t / s.attack } else { (1.0 - (t - s.attack) / s.decay).max(0.0) };
+            f.tune(cutoff_hz((s.base + s.amount * env).min(100.0)), s.resonance, s.rate);
+        }
         let mut out = [0.0; 2];
         for ch in 0..2 {
             let x = a[ch] + (b[ch] - a[ch]) * frac;
@@ -855,6 +889,7 @@ impl Voices {
             release_len: 1,
             cut: None,
             filter: None,
+            sweep: None,
         });
     }
 
@@ -892,8 +927,18 @@ fn voice(p: &Pad, sound: &Sound, pad: u8, velocity: u8, rate: u32) -> Voice {
     // Equal-power pan, normalised so the centre stays at full level.
     let angle = (p.pan + 50) as f32 / 100.0 * PI / 2.0;
     let level = p.level as f32 / 100.0 * velocity_level * std::f32::consts::SQRT_2;
-    let filter =
-        (cutoff < 100).then(|| Svf::new(20.0 * 1000f32.powf(cutoff as f32 / 100.0), p.resonance as f32 / 100.0, r));
+    let resonance = p.resonance as f32 / 100.0;
+    let filter = (cutoff < 100).then(|| Svf::new(cutoff_hz(cutoff as f32), resonance, r));
+    // The MPC's envelope times: (v² + 1) / 2 ms, up to five seconds.
+    let ms = |v: u32| (v * v).div_ceil(2).max(1) as f32 / 1000.0 * r;
+    let sweep = (cutoff < 100 && p.fenv.amount > 0).then(|| Sweep {
+        base: cutoff as f32,
+        amount: p.fenv.amount as f32,
+        attack: ms(p.fenv.attack),
+        decay: ms(p.fenv.decay),
+        resonance,
+        rate: r,
+    });
     Voice {
         pad,
         frames: sound.frames.clone(),
@@ -910,6 +955,7 @@ fn voice(p: &Pad, sound: &Sound, pad: u8, velocity: u8, rate: u32) -> Voice {
         release_len: (r * 0.005 + secs(p.decay, 1.0)) as u32,
         cut: None,
         filter,
+        sweep,
     }
 }
 
@@ -1415,6 +1461,31 @@ mod tests {
         s.hits.push(Hit::Press { pad: 0, velocity: 1, var: None });
         run(&mut s, &mut v, 1);
         assert!(v.voices.is_empty() || v.voices[0].pos >= v.voices[0].end - 2.0);
+    }
+
+    #[test]
+    fn filter_envelope_opens_then_closes() {
+        let rate = 48_000;
+        let (mut s, mut v) = with_kit(rate);
+        // Steady noise, so only the filter changes the level.
+        let noise: Vec<[f32; 2]> =
+            (0..rate as usize).map(|i| ((i * 7919 % 1000) as f32 / 500.0 - 1.0) * 0.5).map(|x| [x, x]).collect();
+        s.pads[0].sound = Some(Sound::new("NOISE", noise.into()));
+        (s.pads[0].cutoff, s.pads[0].fenv) = (20, crate::program::FilterEnv { attack: 10, decay: 20, amount: 70 });
+        s.hits.push(Hit::Press { pad: 0, velocity: 127, var: None });
+        // Attack 50 ms, decay 200 ms: open around 50 ms, closed again after 250 ms.
+        let rms = |s: &mut Shared, v: &mut Voices, frames: usize| {
+            for hit in std::mem::take(&mut s.hits) {
+                s.handle_hit(hit, v);
+            }
+            let sum: f32 = (0..frames).map(|_| v.render()[0].powi(2)).sum();
+            (sum / frames as f32).sqrt()
+        };
+        rms(&mut s, &mut v, 2_000);
+        let open = rms(&mut s, &mut v, 1_000);
+        rms(&mut s, &mut v, 12_000);
+        let closed = rms(&mut s, &mut v, 1_000);
+        assert!(open > closed * 3.0, "open {open}, closed {closed}");
     }
 
     #[test]
