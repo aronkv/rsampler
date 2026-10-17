@@ -1,6 +1,7 @@
 // Release builds on Windows open no console window next to the app.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod allfile;
 mod audio;
 mod edit;
 mod lcd;
@@ -990,8 +991,11 @@ impl App {
             *b = Browser::open(path, !saving);
             return;
         }
-        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pgm")) {
+        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pgm") || e.eq_ignore_ascii_case("aps")) {
             return self.load_program(path);
+        }
+        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("all")) {
+            return self.import_all(path);
         }
         if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("mid")) {
             return self.import_midi(path);
@@ -1041,6 +1045,64 @@ impl App {
             Ok((sound, _)) => self.with(|s| s.preview = Some(sound)),
             Err(e) => self.say(e),
         }
+    }
+
+    /// An MPC `.ALL` file replaces every sequence and the song. Its notes are MPC drum notes, so
+    /// the program it was made with is needed: if none is loaded, the `.APS` of the same name
+    /// next to it is loaded first.
+    fn import_all(&mut self, path: PathBuf) {
+        if self.confirm.as_ref() != Some(&path) {
+            self.say("Replaces all sequences. ENTER again");
+            self.confirm = Some(path);
+            return;
+        }
+        self.confirm = None;
+        let all = match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| allfile::parse(&b)) {
+            Ok(all) => all,
+            Err(e) => return self.say(e),
+        };
+        let mut program = String::new();
+        if self.mpc_notes.is_none()
+            && let Some(aps) = sibling(&path, "aps")
+        {
+            let rate = self.with(|s| s.rate);
+            match pgm::load(&aps, rate) {
+                Ok(pgm::Loaded { name, pads, note_pads, .. }) => {
+                    self.with(|s| s.pads = pads);
+                    self.mpc_notes = Some(note_pads);
+                    program = format!(" with program {name}");
+                }
+                Err(e) => return self.say(e),
+            }
+        }
+        // Without the MPC's program, drum notes 35–98 go to pads A01–D16 in order.
+        let map = self.mpc_notes;
+        let pad_of = move |note: u8| {
+            let n = (note as usize).checked_sub(35).filter(|n| *n < PADS)?;
+            map.map_or(Some(n as u8), |m| m[n])
+        };
+        let (mut dropped, count) = (0, all.seqs.len());
+        let first = all.seqs.first().map_or(0, |s| s.index);
+        self.with(|s| {
+            s.stop();
+            s.t.rec = RecMode::Off;
+            s.seqs = (0..seq::SEQUENCES).map(|_| seq::Sequence::default()).collect();
+            for a in &all.seqs {
+                let (seq, d) = a.to_sequence(pad_of);
+                s.seqs[a.index] = seq;
+                dropped += d;
+            }
+            s.song = match &all.song {
+                Some((steps, looping)) => audio::Song { steps: steps.clone(), looping: *looping },
+                None => audio::Song::default(),
+            };
+            s.t.undo = None;
+            s.t.seq = first;
+            s.locate(0);
+        });
+        let skipped = if dropped > 0 { format!(", {dropped} notes skipped") } else { String::new() };
+        let plural = if count == 1 { "" } else { "s" };
+        self.say(format!("{count} sequence{plural} loaded{program}{skipped}"));
     }
 
     fn import_midi(&mut self, path: PathBuf) {
@@ -2218,6 +2280,15 @@ fn sixteen_levels(n: usize, velocity: u8, var: Option<program::VarParam>, key: u
         // Rounded up so the parameter (value × 100 / 127) lands on 6, 12, … 96.
         Some(p) => (velocity, Some((p, ((6 * (n as u32 + 1) * 127).div_ceil(100)) as u8))),
     }
+}
+
+/// The file next to `path` with the same name and extension `ext`, in any case.
+fn sibling(path: &std::path::Path, ext: &str) -> Option<PathBuf> {
+    let stem = path.file_stem()?;
+    std::fs::read_dir(path.parent()?).ok()?.flatten().map(|e| e.path()).find(|p| {
+        p.file_stem().is_some_and(|s| s.eq_ignore_ascii_case(stem))
+            && p.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext))
+    })
 }
 
 /// How far one DATA wheel step moves a point in a sound: 1/500 of it, or a single frame with Shift.

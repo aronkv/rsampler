@@ -314,7 +314,8 @@ WAV files of any bit depth and sample rate work, mono or stereo. The MPC2000XL's
 sounds load too, with their trim points, loop and tuning, so old MPC sound libraries can be used
 directly.
 
-An MPC2000XL program (`.PGM`) loads onto all 64 pads at once (press `Enter` twice): each pad gets
+An MPC2000XL program (`.PGM`, or the first program of an `.APS` file) loads onto all 64 pads at
+once (press `Enter` twice): each pad gets
 its sound from the `.SND` files next to the program, with the program's tuning, envelope, filter,
 overlap, mute assign, SIMULT / VEL SW mode, velocity modulation, filter envelope, level and pan.
 Sounds that are not there are listed on the LCD.
@@ -334,6 +335,13 @@ leave the screen. Hit the pad the new sound should go to, then:
 from −60 to 0 dBFS with the threshold marked. **REC** (F6) waits for the threshold and records,
 **STOP** ends the take early, then **KEEP** (F6) puts it on the pad as `SAMPLExx` and plays it, or
 **RETRY** (F5) records again. Use TRIM afterwards to cut off silence.
+
+**MPC `.ALL` files** hold every sequence and the songs of an MPC2000XL. Loading one (press `Enter`
+twice) replaces all sequences and the song with its sequences, with their tempo, length, time
+signature, loop, muted tracks, notes and NOTE VARIATION, and its first song. Its notes are played
+by the program they were made with: if no MPC program is loaded yet, the `.APS` file of the same
+name next to it is loaded first, so an MPC disk's `NAME.ALL` + `NAME.APS` + sounds come back as
+they were saved.
 
 ### MIDI files
 
@@ -424,8 +432,7 @@ shows the version and the output sample rate.
 
 - Windows-specific testing
 - INSERT SOUND in the EDIT window
-- Loading the MPC's `.SEQ`, `.APS` and `.ALL` files; its `.SND` sounds, `.PGM` programs and
-  `.MID` sequences already load
+- Effects and the MPC's multiple programs per project (one program plays all tracks here)
 
 ## Reference
 

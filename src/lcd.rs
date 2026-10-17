@@ -29,9 +29,11 @@ impl Browser {
     }
 }
 
-/// WAV files, the MPC2000XL's own .SND sounds and .PGM programs, and MIDI files.
+/// WAV files, the MPC2000XL's own .SND sounds, .PGM and .APS programs and .ALL sequences, and
+/// MIDI files.
 fn is_sound(path: &Path) -> bool {
-    path.extension().is_some_and(|e| ["wav", "snd", "pgm", "mid"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+    path.extension()
+        .is_some_and(|e| ["wav", "snd", "pgm", "aps", "all", "mid"].iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
 
 pub enum Screen {
