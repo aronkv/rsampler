@@ -146,6 +146,8 @@ struct App {
     /// TIME STRETCH: new length in tenths of a percent of the old.
     edit_ratio: u32,
     seq_edit: lcd::SeqEdit,
+    /// The pads as they were before the last sound edit, for UNDO SEQ on the TRIM screens.
+    sound_undo: Option<Vec<(usize, program::Pad)>>,
 }
 
 enum Export {
@@ -254,6 +256,7 @@ impl App {
             edit_op: edit::Op::Discard,
             edit_to: 16,
             edit_ratio: 1000,
+            sound_undo: None,
             seq_edit: lcd::SeqEdit {
                 op: seq::EventOp::Copy,
                 pad: None,
@@ -894,6 +897,23 @@ impl App {
         }
     }
 
+    fn on_sound_screens(&self) -> bool {
+        matches!(self.screen, Screen::Trim | Screen::Loop | Screen::Zone | Screen::Edit(_))
+    }
+
+    /// UNDO SEQ: on the TRIM, LOOP and ZONE screens it takes back the last sound edit (pressed
+    /// again, it redoes it); elsewhere the last sequence edit or recording.
+    fn undo(&mut self) {
+        if !self.on_sound_screens() {
+            return self.with(|s| s.undo());
+        }
+        let Some(before) = self.sound_undo.take() else { return };
+        let after =
+            self.with(|s| before.into_iter().map(|(p, pad)| (p, std::mem::replace(&mut s.pads[p], pad))).collect());
+        self.sound_undo = Some(after);
+        self.say("Sound edit undone (UNDO SEQ again redoes it)");
+    }
+
     /// TIME STRETCH: the section as a new sound on `To pad`. The stretching runs without the
     /// audio lock, so playback carries on meanwhile.
     fn time_stretch(&mut self, range: std::ops::Range<usize>, ratio: u32, from: Section) {
@@ -925,6 +945,13 @@ impl App {
     /// EDIT's DO IT.
     fn do_edit(&mut self, from: Section) {
         let (op, pad, to, ratio) = (self.edit_op, self.pad, self.edit_to, self.edit_ratio);
+        // Keeps the pads the edit can change, for UNDO SEQ.
+        let changes = match op {
+            edit::Op::Slice => to..(to + self.zones.len() - 1).min(PADS),
+            edit::Op::NewSound | edit::Op::TimeStretch => to..to + 1,
+            _ => pad..pad + 1,
+        };
+        self.sound_undo = Some(self.with(|s| changes.map(|p| (p, s.pads[p].clone())).collect()));
         let range = self.section(from);
         let ranges = if op == edit::Op::Slice {
             self.zones.windows(2).map(|w| w[0]..w[1]).collect()
@@ -1675,7 +1702,7 @@ impl App {
             }
             Action::PlayStart => self.play(true),
             Action::Rec(mode) => self.with(|s| s.toggle_rec(mode)),
-            Action::Undo => self.with(|s| s.undo()),
+            Action::Undo => self.undo(),
             Action::Cursor(dx, dy) => self.cursor(dx, dy),
             Action::Data(d) => self.data(d),
             Action::Enter => self.enter(),
@@ -2127,10 +2154,11 @@ impl App {
         }
 
         let (undo, erase) = self.with(|s| (s.t.undo.is_some() && !s.t.playing, s.t.erase));
+        let undo = if self.on_sound_screens() { self.sound_undo.is_some() } else { undo };
         p.label(painter, 176.0, 509.0, "UNDO SEQ", 7.0);
         led(painter, p, 176.0, 518.0, undo, RED_ON, RED_OFF);
         if key(ui, p, p.rect(160.0, 525.0, 32.0, 16.0), &WHITE, "", false).clicked() {
-            self.with(|s| s.undo());
+            self.undo();
         }
         p.label(painter, 234.0, 509.0, "ERASE", 7.0);
         if key(ui, p, p.rect(218.0, 525.0, 32.0, 16.0), &WHITE, "", erase).is_pointer_button_down_on() {

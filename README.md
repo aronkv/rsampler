@@ -295,7 +295,8 @@ Every point moves by 1/500 of the sound per DATA wheel step, or by single frames
 **DO IT** (F5) applies it, **CANCEL** (F4) goes back. New sounds are named after the original
 (`KICK-1`, `KICK-2`, …) and their pads start from the default settings. To chop a break onto 16
 pads: load it on a pad, go to ZONE, set `Zones` to 16, fix the boundaries by ear with PLAY X, then
-EDIT, SLICE SOUND, `To pad` B01, DO IT. Edits cannot be undone, as on the MPC.
+EDIT, SLICE SOUND, `To pad` B01, DO IT. **UNDO SEQ** (`Ctrl+Z`) on these screens takes back the
+last edit, and pressed again redoes it (the MPC itself has no undo for sounds).
 
 To fit a loop to the sequence tempo, stretch it by the old tempo over the new: a 90 BPM break in a
 95 BPM sequence needs 90 / 95 = 94.7 %.
