@@ -169,7 +169,7 @@
   }
 }
 
-/* The search hint is in the box itself, so the list below it stays empty until you type. */
+/* The list under the search box stays empty until you type. */
 .md-search__inner:has(.md-search__input:placeholder-shown) .md-search-result__meta {
   display: none;
 }
