@@ -104,3 +104,67 @@
 .md-footer {
   border-top: 1px solid var(--md-default-fg-color--lightest);
 }
+
+/* A little motion: the home page fades in, cards and the screenshot lift under the mouse. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.hero > * {
+  animation: rise 0.6s ease-out both;
+}
+
+.hero > :nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.hero > :nth-child(3) {
+  animation-delay: 0.2s;
+}
+
+.md-typeset img.screenshot {
+  animation: rise 0.8s 0.3s ease-out both;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.md-typeset img.screenshot:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+}
+
+.md-typeset .grid.cards > ul > li {
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  transform: translateY(-3px);
+  border-color: var(--md-typeset-a-color);
+}
+
+.md-typeset .md-button {
+  transition: transform 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.md-typeset .md-button:hover {
+  transform: translateY(-2px);
+}
+
+.md-content__inner {
+  animation: rise 0.35s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
