@@ -88,9 +88,9 @@
 }
 
 .md-typeset .md-button:not(.md-button--primary):hover {
-  color: #fff;
-  background-color: #c8372f;
-  border-color: #c8372f;
+  color: var(--md-default-bg-color);
+  background-color: var(--md-typeset-a-color);
+  border-color: var(--md-typeset-a-color);
 }
 
 [data-md-color-scheme] {
