@@ -1,0 +1,6 @@
+{#- English, with the search hint inside the search box -#}
+{% macro t(key) %}{{ {
+  "language": "en",
+  "direction": "ltr",
+  "search.placeholder": "Type to start searching",
+}[key] }}{% endmacro %}

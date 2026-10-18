@@ -168,3 +168,8 @@
     transition: none !important;
   }
 }
+
+/* The search hint is in the box itself, so the list below it stays empty until you type. */
+.md-search__inner:has(.md-search__input:placeholder-shown) .md-search-result__meta {
+  display: none;
+}

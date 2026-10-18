@@ -18,6 +18,8 @@ nav:
 
 theme:
   name: material
+  custom_dir: overrides
+  language: custom
   logo: assets/rsampler.svg
   favicon: favicon.ico
   palette:
@@ -34,6 +36,7 @@ theme:
         icon: material/weather-night
         name: Dark mode
   features:
+    - navigation.instant
     - navigation.footer
     - navigation.top
     - navigation.tracking
