@@ -2417,13 +2417,21 @@ impl App {
         p.label(painter, 350.0, 467.0, "CURSOR", 9.0);
         painter.rect_filled(p.rect(308.0, 476.0, 86.0, 66.0), 4.0 * s, BODY_EDGE);
         let arrows = [
-            (p.rect(331.0, 479.0, 40.0, 29.0), "︿", (0, -1)),
-            (p.rect(331.0, 510.0, 40.0, 29.0), "﹀", (0, 1)),
-            (p.rect(311.0, 479.0, 18.0, 60.0), "‹", (-1, 0)),
-            (p.rect(373.0, 479.0, 18.0, 60.0), "›", (1, 0)),
+            (p.rect(331.0, 479.0, 40.0, 29.0), (0, -1)),
+            (p.rect(331.0, 510.0, 40.0, 29.0), (0, 1)),
+            (p.rect(311.0, 479.0, 18.0, 60.0), (-1, 0)),
+            (p.rect(373.0, 479.0, 18.0, 60.0), (1, 0)),
         ];
-        for (rect, glyph, (dx, dy)) in arrows {
-            if key(ui, p, rect, &WHITE, glyph, false).clicked() {
+        for (rect, (dx, dy)) in arrows {
+            let resp = key(ui, p, rect, &WHITE, "", false);
+            // Drawn rather than typed: arrow characters are missing from some fonts (Windows
+            // showed empty boxes).
+            let c = rect.center() + vec2(0.0, if resp.is_pointer_button_down_on() { s } else { 0.0 });
+            let (along, across) = (vec2(dx as f32, dy as f32) * 3.0 * s, vec2(-dy as f32, dx as f32) * 4.0 * s);
+            let tip = c + along;
+            let points = vec![tip, c - along + across, c - along - across];
+            painter.add(egui::Shape::convex_polygon(points, INK, Stroke::NONE));
+            if resp.clicked() {
                 self.cursor(dx, dy);
             }
         }
