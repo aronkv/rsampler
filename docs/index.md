@@ -1,23 +1,21 @@
 ---
-title: Home
-layout: home
-nav_order: 1
+hide:
+  - toc
 ---
 
-<div class="hero" markdown="1">
+<div class="hero" markdown>
 
 # rsampler
-{: .fs-9 }
 
 A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.
-{: .fs-6 .fw-300 }
+{ .tagline }
 
-[Get started](getting-started.md){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
-[Download](https://github.com/aronkv/rsampler/releases/latest){: .btn .fs-5 .mb-4 .mb-md-0 }
+[Get started](getting-started.md){ .md-button .md-button--primary }
+[Download](https://github.com/aronkv/rsampler/releases/latest){ .md-button }
 
 </div>
 
-<img class="screenshot" src="{{ '/assets/screenshot.png' | relative_url }}" alt="rsampler playing a sequence: the LCD, DATA wheel, transport and 16 pads">
+![rsampler playing a sequence: the LCD, DATA wheel, transport and 16 pads](assets/screenshot.png){ .screenshot }
 
 rsampler works like the MPC2000XL: one LCD screen at a time, CURSOR keys to move between fields,
 the DATA wheel to change them, and 16 velocity pads to play. If you have used an MPC, you already
@@ -25,20 +23,57 @@ know your way around; if not, this guide takes you through it.
 
 ## What it does
 
-| | |
-| --- | --- |
-| **[Pads](pads.md)** | 16 velocity pads in four banks, played with the mouse, the computer keyboard or a MIDI controller. 16 LEVELS and NOTE VARIATION. |
-| **[Sequencer](sequencing.md)** | 99 sequences of 64 tracks, quantize and swing, overdub, note repeat, step and bar editing, punch in and out, song mode. |
-| **[Programs](programs.md)** | 24 programs on four DRUM buses: tuning, envelopes, filter with its own envelope, velocity modulation, mute groups, layers and velocity switching. |
-| **[Mixer and effects](programs.md#mixer-and-effects)** | Level and pan per pad, a reverb and a tempo-synced delay on the FX send. |
-| **[Sounds](sounds.md)** | Load WAV, MP3, FLAC, M4A, Ogg and AIFF, sample from the input, trim, loop, chop into zones, stretch, resample, slice. |
-| **[Files](files.md)** | The MPC2000XL's own `.SND`, `.PGM`, `.APS` and `.ALL` files, MIDI files, projects and WAV export. |
-| **[MIDI](midi.md)** | MIDI in from any controller, MIDI out per track, MIDI tracks for synths, clock in and out. |
+<div class="grid cards" markdown>
+
+-   :material-grid:{ .lg .middle } **[Pads](pads.md)**
+
+    ---
+
+    16 velocity pads in four banks, played with the mouse, the computer keyboard or a MIDI controller. 16 LEVELS and NOTE VARIATION.
+
+-   :material-timeline-clock-outline:{ .lg .middle } **[Sequencer](sequencing.md)**
+
+    ---
+
+    99 sequences of 64 tracks, quantize and swing, overdub, note repeat, step and bar editing, punch in and out, song mode.
+
+-   :material-tune-variant:{ .lg .middle } **[Programs](programs.md)**
+
+    ---
+
+    24 programs on four DRUM buses: tuning, envelopes, filter with its own envelope, velocity modulation, mute groups, layers and velocity switching.
+
+-   :material-tune-vertical:{ .lg .middle } **[Mixer and effects](programs.md#mixer-and-effects)**
+
+    ---
+
+    Level and pan per pad, a reverb and a tempo-synced delay on the FX send.
+
+-   :material-waveform:{ .lg .middle } **[Sounds](sounds.md)**
+
+    ---
+
+    Load WAV, MP3, FLAC, M4A, Ogg and AIFF, sample from the input, trim, loop, chop into zones, stretch, resample, slice.
+
+-   :material-folder-music-outline:{ .lg .middle } **[Files](files.md)**
+
+    ---
+
+    The MPC2000XL's own `.SND`, `.PGM`, `.APS` and `.ALL` files, MIDI files, projects and WAV export.
+
+-   :material-midi-port:{ .lg .middle } **[MIDI](midi.md)**
+
+    ---
+
+    MIDI in from any controller, MIDI out per track, MIDI tracks for synths, clock in and out.
+
+</div>
 
 ## Platforms
 
 Linux and Windows, from the same code. See [Getting started](getting-started.md) for installing.
 
-{: .note }
-[izzyreal/mpc](https://github.com/izzyreal/mpc) (the engine behind VMPC2000XL) is used as a
-behavioural and file-format reference only; rsampler contains no code from it.
+!!! note
+
+    [izzyreal/mpc](https://github.com/izzyreal/mpc) (the engine behind VMPC2000XL) is used as a
+    behavioural and file-format reference only; rsampler contains no code from it.

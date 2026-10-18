@@ -1,15 +1,4 @@
----
-title: Getting started
-nav_order: 2
----
-
 # Getting started
-{: .no_toc }
-
-1. TOC
-{:toc}
-
----
 
 ## Install
 

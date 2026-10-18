@@ -1,8 +1,3 @@
----
-title: Keyboard shortcuts
-nav_order: 9
----
-
 # Keyboard shortcuts
 
 | Key | Does |

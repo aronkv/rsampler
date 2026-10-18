@@ -1,15 +1,4 @@
----
-title: Files
-nav_order: 7
----
-
 # Files
-{: .no_toc }
-
-1. TOC
-{:toc}
-
----
 
 ## Saving and loading projects
 
@@ -28,9 +17,10 @@ Once a project has been saved or loaded, <kbd>Ctrl</kbd>+<kbd>S</kbd> saves over
 To load, choose the project (marked `PROJECT`) on the LOAD screen and press <kbd>Enter</kbd> twice;
 loading replaces everything that is open.
 
-{: .note }
-Closing the window with unsaved changes shows a warning on the LCD instead; close it again to quit
-without saving.
+!!! note
+
+    Closing the window with unsaved changes shows a warning on the LCD instead; close it again to quit
+    without saving.
 
 ## Exporting audio
 
@@ -60,9 +50,10 @@ tracks, track buses, notes and NOTE VARIATION of every sequence, and its first s
 played by the program they were made with: if no MPC program is loaded yet, the `.APS` file of the
 same name next to it is loaded first.
 
-{: .tip }
-Copy the whole MPC disk folder (`NAME.ALL`, `NAME.APS` and the `.SND` files) and load the `.ALL`:
-the sequences, programs and sounds come back together.
+!!! tip
+
+    Copy the whole MPC disk folder (`NAME.ALL`, `NAME.APS` and the `.SND` files) and load the `.ALL`:
+    the sequences, programs and sounds come back together.
 
 ## MIDI files
 

@@ -1,15 +1,4 @@
----
-title: Programs and mixer
-nav_order: 5
----
-
 # Programs and mixer
-{: .no_toc }
-
-1. TOC
-{:toc}
-
----
 
 ## Programs and DRUM buses
 
@@ -45,8 +34,9 @@ Open it with the blue **6 / PROGRAM** key (<kbd>Ctrl</kbd>+<kbd>6</kbd>). Hit a 
 | `Mode`    | NORMAL; SIMULT also plays the two `Also` pads, layered; VEL SW plays another pad when hit harder than its threshold |
 | `Level`, `Pan` | Same as in the mixer |
 
-{: .tip }
-With VEL SW, `Over 64:A02 100:A03` means: above velocity 64 play A02, above 100 play A03.
+!!! tip
+
+    With VEL SW, `Over 64:A02 100:A03` means: above velocity 64 play A02, above 100 play A03.
 
 **CLEAR** (F6) removes the pad's sound.
 
@@ -87,5 +77,7 @@ Both effects work on everything sent to them, so a snare with FX SEND 40 gets ro
 stays dry. The settings are saved with the project, the WAV export includes the effects and their
 tails, and the FX send of an MPC `.PGM` carries over.
 
-{: .mpc }
-The effects stand in for the MPC2000XL's optional effects board.
+!!! quote "On the MPC"
+
+    The effects stand in for the MPC2000XL's optional effects board.
+

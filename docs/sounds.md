@@ -1,15 +1,4 @@
----
-title: Sounds
-nav_order: 6
----
-
 # Sounds
-{: .no_toc }
-
-1. TOC
-{:toc}
-
----
 
 ## Loading samples
 
@@ -94,8 +83,9 @@ EDIT works on St–End from TRIM, on the loop from LOOP, and on the selected zon
 (<kbd>Ctrl</kbd>+<kbd>Z</kbd>) on these screens takes back the last edit, and pressed again redoes
 it.
 
-{: .mpc }
-The MPC itself has no undo for sounds.
+!!! quote "On the MPC"
+
+    The MPC itself has no undo for sounds.
 
 ### Chopping a break onto 16 pads
 

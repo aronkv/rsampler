@@ -1,15 +1,4 @@
----
-title: MIDI and setup
-nav_order: 8
----
-
 # MIDI and setup
-{: .no_toc }
-
-1. TOC
-{:toc}
-
----
 
 ## MIDI in
 
@@ -17,8 +6,9 @@ rsampler listens to every MIDI input it finds, including controllers plugged in 
 on Linux it also offers its own `rsampler` input port for other programs. Notes 36–99 (C1–D#6) play
 pads A01–D16 with their velocity, whatever bank is selected, and are recorded like pad hits.
 
-{: .tip }
-Most 16-pad controllers send notes 36–51 by default, which lands on bank A.
+!!! tip
+
+    Most 16-pad controllers send notes 36–51 by default, which lands on bank A.
 
 ## MIDI out
 
@@ -33,9 +23,10 @@ The choice is saved with the project. A track whose `Out` field is set to a chan
 there as it plays (pad A01 = note 36 again), and pads you hit pass through on the selected track's
 channel, so the pads can play an external synth.
 
-{: .note }
-Windows has no virtual MIDI ports, so there is no own `rsampler` port there; choose an output in
-SETUP instead.
+!!! note
+
+    Windows has no virtual MIDI ports, so there is no own `rsampler` port there; choose an output in
+    SETUP instead.
 
 ## MIDI tracks
 

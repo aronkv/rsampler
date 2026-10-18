@@ -1,0 +1,68 @@
+site_name: rsampler
+site_description: A desktop sampler inspired by the Akai MPC2000XL, written in pure Rust.
+site_url: https://aronkv.github.io/rsampler/
+repo_url: https://github.com/aronkv/rsampler
+repo_name: aronkv/rsampler
+edit_uri: edit/main/docs/
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Pads: pads.md
+  - Sequencer: sequencing.md
+  - Programs and mixer: programs.md
+  - Sounds: sounds.md
+  - Files: files.md
+  - MIDI and setup: midi.md
+  - Keyboard shortcuts: shortcuts.md
+
+theme:
+  name: material
+  logo: assets/rsampler.svg
+  favicon: favicon.ico
+  palette:
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+  features:
+    - navigation.footer
+    - navigation.top
+    - navigation.tracking
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+
+extra:
+  generator: false
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      title: On this page
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+validation:
+  links:
+    anchors: warn

@@ -1,15 +1,4 @@
----
-title: Sequencer
-nav_order: 4
----
-
 # Sequencer
-{: .no_toc }
-
-1. TOC
-{:toc}
-
----
 
 ## The MAIN screen
 

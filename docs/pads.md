@@ -1,15 +1,4 @@
----
-title: Pads
-nav_order: 3
----
-
 # Pads
-{: .no_toc }
-
-1. TOC
-{:toc}
-
----
 
 ## Playing the pads
 
@@ -78,6 +67,8 @@ slider changes:
 
 The value is recorded with each note and played back with it.
 
-{: .mpc }
-On the MPC, AFTER makes pad pressure drive the variation. Keyboards and mice have no pressure, so
-here it only opens ASSIGN.
+!!! quote "On the MPC"
+
+    On the MPC, AFTER makes pad pressure drive the variation. Keyboards and mice have no pressure, so
+    here it only opens ASSIGN.
+
