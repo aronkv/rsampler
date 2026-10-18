@@ -1150,13 +1150,13 @@ impl App {
     }
 
     /// A MIDI file replaces the current sequence (UNDO SEQ brings it back), after a second ENTER.
-    /// A WAV or `.SND` file as a sound at the output rate, with the `.SND`'s own tuning.
+    /// A sound file as a sound at the output rate, with an MPC `.SND`'s own tuning.
     fn read_sound(&self, path: &std::path::Path) -> Result<(Sound, i32), String> {
         let rate = self.with(|s| s.rate);
         if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("snd")) {
             snd::load(path, rate)
         } else {
-            audio::load_wav(path, rate).map_err(|e| e.to_string()).map(|frames| {
+            audio::load_audio(path, rate).map(|frames| {
                 let name = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
                 (Sound::new(name, frames), 0)
             })
@@ -1167,9 +1167,11 @@ impl App {
     fn preview(&mut self) {
         let Screen::Load(b) = &self.screen else { return };
         let Some(path) = b.entries.get(b.cursor).cloned() else { return };
-        let sound = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav") || e.eq_ignore_ascii_case("snd"));
+        let sound = path.extension().is_some_and(|e| {
+            e.eq_ignore_ascii_case("snd") || audio::AUDIO_EXTENSIONS.iter().any(|x| e.eq_ignore_ascii_case(x))
+        });
         if !sound {
-            return self.say("PLAY works on WAV and SND files");
+            return self.say("PLAY works on sound files");
         }
         match self.read_sound(&path) {
             Ok((sound, _)) => self.with(|s| s.preview = Some(sound)),

@@ -29,11 +29,12 @@ impl Browser {
     }
 }
 
-/// WAV files, the MPC2000XL's own .SND sounds, .PGM and .APS programs and .ALL sequences, and
-/// MIDI files.
+/// Sound and music files, the MPC2000XL's own .SND sounds, .PGM and .APS programs and .ALL
+/// sequences, and MIDI files.
 fn is_sound(path: &Path) -> bool {
+    let mpc = ["snd", "pgm", "aps", "all", "mid"];
     path.extension()
-        .is_some_and(|e| ["wav", "snd", "pgm", "aps", "all", "mid"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+        .is_some_and(|e| crate::audio::AUDIO_EXTENSIONS.iter().chain(&mpc).any(|x| e.eq_ignore_ascii_case(x)))
 }
 
 pub enum Screen {

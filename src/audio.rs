@@ -1167,6 +1167,83 @@ pub fn write_wav(path: &Path, frames: &[[f32; 2]], rate: u32) -> Result<(), houn
     w.finalize()
 }
 
+/// Music and sound files besides WAV that `load_audio` reads.
+pub const AUDIO_EXTENSIONS: [&str; 10] = ["wav", "mp3", "flac", "m4a", "aac", "mp4", "ogg", "oga", "aif", "aiff"];
+
+/// Loads a sound file as stereo frames resampled to `rate`: WAV, MP3, FLAC, M4A/AAC/ALAC,
+/// Ogg Vorbis or AIFF. Mono becomes both channels; more than two channels keep the first two.
+pub fn load_audio(path: &Path, rate: u32) -> Result<Frames, String> {
+    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")) {
+        return load_wav(path, rate).map_err(|e| e.to_string());
+    }
+    use symphonia::core::codecs::audio::AudioDecoderOptions;
+    use symphonia::core::errors::Error as DecodeError;
+    use symphonia::core::formats::probe::Hint;
+    use symphonia::core::formats::{FormatOptions, TrackType};
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    let unsupported = |_| "Not a sound file rsampler can read".to_owned();
+    let mut format = symphonia::default::get_probe()
+        .probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())
+        .map_err(unsupported)?;
+    let track = format.default_track(TrackType::Audio).ok_or("No audio in this file")?;
+    let params = track.codec_params.as_ref().and_then(|p| p.audio()).ok_or("No audio in this file")?;
+    let mut decoder = symphonia::default::get_codecs()
+        .make_audio_decoder(params, &AudioDecoderOptions::default())
+        .map_err(|_| "This file's codec is not supported".to_owned())?;
+    // AAC in MP4 starts with 1024 frames of encoder delay that the MP4 reader leaves in (it is
+    // only signalled in the edit list), which would make a drum hit start late. Other formats
+    // trim theirs while decoding.
+    // ponytail: assumes the usual 1024; files with another delay (iTunes uses 2112) keep the rest.
+    let aac_delay = params.codec == symphonia::core::codecs::audio::well_known::CODEC_ID_AAC && track.delay.is_none();
+    let (skip, length) = if aac_delay { (1024, track.num_frames.map(|n| n.saturating_sub(1024))) } else { (0, None) };
+    let track_id = track.id;
+    // ponytail: decodes the whole file into memory; 20 minutes at 48 kHz is about 460 MB of frames,
+    // so longer files are refused rather than streamed.
+    const MAX_SECONDS: usize = 20 * 60;
+    let (mut frames, mut from, mut buf) = (Vec::new(), 0u32, Vec::<f32>::new());
+    loop {
+        let packet = match format.next_packet() {
+            Ok(Some(packet)) => packet,
+            Ok(None) => break,
+            Err(DecodeError::ResetRequired) => break,
+            Err(e) => return Err(e.to_string()),
+        };
+        if packet.track_id != track_id {
+            continue;
+        }
+        let audio = match decoder.decode(&packet) {
+            Ok(audio) => audio,
+            // A damaged frame is skipped, as players do.
+            Err(DecodeError::DecodeError(_)) => continue,
+            Err(e) => return Err(e.to_string()),
+        };
+        let (channels, r) = (audio.spec().channels().count().max(1), audio.spec().rate());
+        from = r;
+        buf.resize(audio.samples_interleaved(), 0.0);
+        audio.copy_to_slice_interleaved(&mut buf);
+        frames.extend(buf.chunks_exact(channels).map(|f| if channels == 1 { [f[0], f[0]] } else { [f[0], f[1]] }));
+        if frames.len() > MAX_SECONDS * r.max(1) as usize {
+            return Err("Longer than 20 minutes".to_owned());
+        }
+    }
+    frames.drain(..skip.min(frames.len()));
+    if let Some(n) = length {
+        frames.truncate(n as usize);
+    }
+    if frames.is_empty() || from == 0 {
+        return Err("No audio in this file".to_owned());
+    }
+    Ok(resample(&frames, from, rate).into())
+}
+
 /// Loads a WAV file as stereo frames resampled to `rate`.
 pub fn load_wav(path: &Path, rate: u32) -> Result<Frames, hound::Error> {
     let mut reader = hound::WavReader::open(path)?;
@@ -1723,6 +1800,36 @@ mod tests {
         s.play(true);
         assert_eq!(run(&mut s, &mut v, 250 * 4), 0.0);
         assert!(rx.try_iter().any(|m| m == [0x90, 110, 80]));
+    }
+
+    #[test]
+    fn other_formats_decode_like_the_wav() {
+        // A FLAC made from a WAV must decode to the same audio.
+        let dir = std::env::temp_dir().join(format!("rsampler-flac-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = dir.join("t.wav");
+        let tone: Vec<[f32; 2]> = (0..4800).map(|i| [(i as f32 * 0.05).sin() * 0.5, 0.25]).collect();
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut w = hound::WavWriter::create(&wav, spec).unwrap();
+        for x in tone.iter().flatten() {
+            w.write_sample((x * 32767.0) as i16).unwrap();
+        }
+        w.finalize().unwrap();
+        let flac = dir.join("t.flac");
+        let made = std::process::Command::new("flac").args(["-s", "-f", "-o"]).arg(&flac).arg(&wav).status();
+        if made.is_ok_and(|s| s.success()) {
+            let (a, b) = (load_audio(&wav, 48_000).unwrap(), load_audio(&flac, 48_000).unwrap());
+            assert_eq!(a.len(), b.len());
+            assert!(a.iter().zip(b.iter()).all(|(x, y)| (x[0] - y[0]).abs() < 1e-3 && (x[1] - y[1]).abs() < 1e-3));
+        }
+        std::fs::write(dir.join("bad.mp3"), b"not audio").unwrap();
+        assert!(load_audio(&dir.join("bad.mp3"), 48_000).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
