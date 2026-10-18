@@ -55,15 +55,15 @@ The blue keys open the other modes, also reachable with <kbd>Ctrl</kbd>+number:
 
 | Key | Mode |
 | --- | --- |
-| 1 | [SONG](sequencing#song) |
-| 2 | [MISC](sequencing#misc-punch-transpose-and-a-second-sequence) |
-| 3 | [LOAD](sounds#loading-samples) |
-| 4 | [SAMPLE](sounds#sample-recording-from-the-input) |
-| 5 | [TRIM](sounds#trim-loop-and-zone) |
-| 6 | [PROGRAM](programs) |
-| 7 | [SETUP](midi#setup-and-other) |
-| 8 | [MIXER](programs#mixer-and-effects) |
-| 9 | [OTHER](midi#setup-and-other) |
+| 1 | [SONG](sequencing.md#song) |
+| 2 | [MISC](sequencing.md#misc-punch-transpose-and-a-second-sequence) |
+| 3 | [LOAD](sounds.md#loading-samples) |
+| 4 | [SAMPLE](sounds.md#sample-recording-from-the-input) |
+| 5 | [TRIM](sounds.md#trim-loop-and-zone) |
+| 6 | [PROGRAM](programs.md) |
+| 7 | [SETUP](midi.md#setup-and-other) |
+| 8 | [MIXER](programs.md#mixer-and-effects) |
+| 9 | [OTHER](midi.md#setup-and-other) |
 
 ## Your first beat
 
@@ -75,5 +75,5 @@ The blue keys open the other modes, also reachable with <kbd>Ctrl</kbd>+number:
 3. Press **STOP** (<kbd>Space</kbd>). Press **PLAY** again to hear it.
 4. Add more with **OVERDUB** (<kbd>Ctrl</kbd>+<kbd>O</kbd>), or take a pass back with **UNDO SEQ**
    (<kbd>Ctrl</kbd>+<kbd>Z</kbd>).
-5. Load your own sounds onto other pads from [LOAD](sounds#loading-samples) and save the whole
-   thing with <kbd>Ctrl</kbd>+<kbd>S</kbd> ([projects](files#saving-and-loading-projects)).
+5. Load your own sounds onto other pads from [LOAD](sounds.md#loading-samples) and save the whole
+   thing with <kbd>Ctrl</kbd>+<kbd>S</kbd> ([projects](files.md#saving-and-loading-projects)).

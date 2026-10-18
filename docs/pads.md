@@ -14,8 +14,8 @@ nav_order: 3
 ## Playing the pads
 
 Click a pad or hit its key. With the mouse, hitting higher on a pad plays louder; keys always play
-at velocity 101 (changeable in [SETUP](midi#setup-and-other)), and **FULL LEVEL** (<kbd>F7</kbd>)
-makes everything 127. A [MIDI controller](midi) plays them with its own velocity.
+at velocity 101 (changeable in [SETUP](midi.md#setup-and-other)), and **FULL LEVEL** (<kbd>F7</kbd>)
+makes everything 127. A [MIDI controller](midi.md) plays them with its own velocity.
 
 The keys follow their physical position, so the layout works the same on QWERTY, QWERTZ
 (Hungarian, German) and AZERTY keyboards:
@@ -42,12 +42,12 @@ The last pad you hit is the **selected pad** that the PROGRAM, MIXER, TRIM and L
 
 A pad plays its whole sound, even after you let go. To make it stop:
 
-- Set its `Overlap` to **NOTE OFF** on the [PROGRAM](programs) screen: it stops when the pad is
+- Set its `Overlap` to **NOTE OFF** on the [PROGRAM](programs.md) screen: it stops when the pad is
   released (or, in a sequence, when the note ends).
 - **MONO** cuts the previous hit when the pad is hit again; `Mutes` lets one pad cut off another,
   like a closed hi-hat stopping an open one.
 - A looping sound always stops when the pad is released.
-- Long sounds can be shortened with `End` on the [TRIM](sounds#trim-loop-and-zone) screen.
+- Long sounds can be shortened with `End` on the [TRIM](sounds.md#trim-loop-and-zone) screen.
 
 ## 16 LEVELS
 

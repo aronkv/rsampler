@@ -14,7 +14,7 @@ nav_order: 5
 ## Programs and DRUM buses
 
 As on the MPC, there can be up to 24 programs, each a full set of 64 pads. Every track has a `Bus`
-(on the [MAIN screen](sequencing#the-main-screen)): DRUM1–4, or MIDI for a track that only sends
+(on the [MAIN screen](sequencing.md#the-main-screen)): DRUM1–4, or MIDI for a track that only sends
 its notes out over MIDI. Each DRUM bus plays one program, chosen with `Pgm` on the PROGRAM screen
 for the selected track's bus.
 

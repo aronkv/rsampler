@@ -26,4 +26,4 @@ nav_order: 9
 | <kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd> | SONG, MISC, LOAD, SAMPLE, TRIM, PROGRAM, SETUP, MIXER, OTHER |
 | <kbd>Esc</kbd> | MAIN SCREEN |
 
-The pad keys are on the [Pads](pads#playing-the-pads) page.
+The pad keys are on the [Pads](pads.md#playing-the-pads) page.

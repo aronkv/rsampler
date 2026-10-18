@@ -11,6 +11,7 @@ defaults:
 
 plugins:
   - jekyll-remote-theme
+  - jekyll-relative-links
 
 color_scheme: rsampler
 logo: /assets/rsampler.svg

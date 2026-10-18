@@ -31,7 +31,7 @@ These formats load, mono or stereo, up to 20 minutes long:
 - The MPC2000XL's own `.SND` sounds, with their trim points, loop and tuning, so old MPC sound
   libraries can be used directly
 
-MPC programs and sequences load from the same screen; see [Files](files).
+MPC programs and sequences load from the same screen; see [Files](files.md).
 
 ## SAMPLE: recording from the input
 

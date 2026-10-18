@@ -28,7 +28,7 @@ The MAIN screen (**MAIN SCREEN** or <kbd>Esc</kbd>) shows the sequencer:
 | `Loop`     | Loop the sequence |
 | `Bars`     | Sequence length |
 | `Tr`, `On` | Track 1–64 and whether it plays |
-| `Bus`      | DRUM1–4: the [program](programs) the track plays; MIDI: no sound of its own, only [MIDI out](midi) |
+| `Bus`      | DRUM1–4: the [program](programs.md) the track plays; MIDI: no sound of its own, only [MIDI out](midi.md) |
 | `Out`      | MIDI channel the track's notes are sent on, OFF by default |
 
 ## Recording

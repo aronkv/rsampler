@@ -28,3 +28,14 @@ kbd {
 .hero .fs-6 {
   color: $grey-lt-300;
 }
+
+// Keep the navigation against the left edge on wide screens instead of centring the whole layout.
+@include mq(lg) {
+  .side-bar {
+    width: $nav-width;
+  }
+
+  .side-bar + .main {
+    margin-left: $nav-width;
+  }
+}
