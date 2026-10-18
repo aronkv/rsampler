@@ -80,3 +80,27 @@
   padding-bottom: 0.3rem;
   border-bottom: 1px solid var(--md-default-fg-color--lightest);
 }
+
+/* The plain button and the footer follow the colour scheme, light or dark. */
+.md-typeset .md-button:not(.md-button--primary) {
+  color: var(--md-typeset-a-color);
+  border-color: var(--md-typeset-a-color);
+}
+
+.md-typeset .md-button:not(.md-button--primary):hover {
+  color: #fff;
+  background-color: #c8372f;
+  border-color: #c8372f;
+}
+
+[data-md-color-scheme] {
+  --md-footer-bg-color: var(--md-default-bg-color);
+  --md-footer-bg-color--dark: var(--md-default-bg-color);
+  --md-footer-fg-color: var(--md-default-fg-color);
+  --md-footer-fg-color--light: var(--md-default-fg-color--light);
+  --md-footer-fg-color--lighter: var(--md-default-fg-color--lighter);
+}
+
+.md-footer {
+  border-top: 1px solid var(--md-default-fg-color--lightest);
+}
