@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- A small picture of the app, laid out in its proportions. -->
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#EEEAE1"/>
+      <stop offset="1" stop-color="#D5D0C4"/>
+    </linearGradient>
+    <linearGradient id="lcd" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4FC3D3"/>
+      <stop offset="1" stop-color="#36A6B7"/>
+    </linearGradient>
+  </defs>
+  <!-- Panel -->
+  <rect x="8" y="12" width="240" height="232" rx="30" fill="#BDB7AA"/>
+  <rect x="8" y="8" width="240" height="232" rx="30" fill="url(#body)"/>
+  <!-- Everything on the panel, shrunk towards the middle for a wide margin -->
+  <g transform="translate(128 124) scale(0.8) translate(-128 -124)">
+  <!-- LCD in its dark frame -->
+  <rect x="23.7" y="12.3" width="101.8" height="50.6" rx="4" fill="#2B2D31"/>
+  <rect x="31.1" y="17.7" width="87.6" height="35.2" rx="2" fill="url(#lcd)"/>
+  <rect x="34" y="30" width="44" height="4" rx="2" fill="#1F6F7A" opacity="0.75"/>
+  <rect x="34" y="38" width="62" height="4" rx="2" fill="#1F6F7A" opacity="0.75"/>
+  <rect x="34" y="46" width="32" height="4" rx="2" fill="#1F6F7A" opacity="0.75"/>
+  <!-- Logo and DRUM SAMPLER legend -->
+  <rect x="140" y="27" width="40" height="10" rx="5" fill="#C8372F"/>
+  <rect x="190" y="27" width="52" height="5" rx="2.5" fill="#55575A" opacity="0.7"/>
+  <rect x="186" y="35" width="56" height="2" fill="#55575A" opacity="0.7"/>
+  <!-- Top right controls: level keys, REC GAIN and MAIN VOLUME, PAD BANK -->
+  <rect x="139" y="45" width="107" height="47" rx="5" fill="#A3AAAB"/>
+  <rect x="144" y="50" width="38" height="18" rx="3" fill="#E4E1D9"/>
+  <rect x="144" y="70" width="38" height="18" rx="3" fill="#E4E1D9"/>
+  <circle cx="199" cy="59" r="7.5" fill="#2B2D31"/>
+  <circle cx="199" cy="59" r="5.5" fill="#EBA3A6"/>
+  <circle cx="225" cy="59" r="7.5" fill="#2B2D31"/>
+  <circle cx="225" cy="59" r="5.5" fill="#F4F2EC"/>
+  <rect x="189" y="78" width="10" height="7" rx="1.5" fill="#F4F2EC"/>
+  <rect x="203" y="78" width="10" height="7" rx="1.5" fill="#F4F2EC"/>
+  <rect x="217" y="78" width="10" height="7" rx="1.5" fill="#F4F2EC"/>
+  <rect x="231" y="78" width="10" height="7" rx="1.5" fill="#F4F2EC"/>
+  <!-- DATA wheel -->
+  <circle cx="90.9" cy="129.4" r="16" fill="#2B2D31"/>
+  <circle cx="90.9" cy="129.4" r="11" fill="#404247"/>
+  <circle cx="94.4" cy="135.3" r="2.5" fill="#26282B"/>
+  <!-- NOTE VARIATION slider -->
+  <rect x="15.2" y="146.6" width="20.9" height="81.2" rx="1" fill="none" stroke="#3A3C40" stroke-width="1.5"/>
+  <rect x="24.7" y="176.8" width="2.5" height="47.4" rx="1.2" fill="#2B2D31"/>
+  <rect x="18.7" y="194.9" width="13.4" height="6.8" rx="1.2" fill="#F4F2EC"/>
+  <rect x="18.7" y="197.6" width="13.4" height="1.5" fill="#3E73B8"/>
+  <!-- F1–F6 -->
+  <rect x="45.8" y="74.1" width="6.7" height="4.5" rx="1.2" fill="#F4F2EC"/>
+  <rect x="55.8" y="74.1" width="6.7" height="4.5" rx="1.2" fill="#F4F2EC"/>
+  <rect x="66.0" y="74.1" width="6.7" height="4.5" rx="1.2" fill="#F4F2EC"/>
+  <rect x="76.2" y="74.1" width="6.7" height="4.5" rx="1.2" fill="#F4F2EC"/>
+  <rect x="86.2" y="74.1" width="6.7" height="4.5" rx="1.2" fill="#F4F2EC"/>
+  <rect x="96.4" y="74.1" width="6.7" height="4.5" rx="1.2" fill="#F4F2EC"/>
+  <!-- MAIN SCREEN, OPEN WINDOW -->
+  <rect x="75.9" y="93.8" width="7.5" height="4.5" rx="1.2" fill="#F4F2EC"/>
+  <rect x="98.9" y="93.8" width="7.7" height="4.5" rx="1.2" fill="#E8892C"/>
+  <!-- Mode keys, SHIFT, 0, ENTER -->
+  <rect x="23.5" y="98.5" width="5.7" height="3.2" rx="1.2" fill="#3E73B8"/>
+  <rect x="39.3" y="98.5" width="5.7" height="3.2" rx="1.2" fill="#3E73B8"/>
+  <rect x="55.1" y="98.5" width="5.7" height="3.2" rx="1.2" fill="#3E73B8"/>
+  <rect x="23.5" y="110.5" width="5.7" height="3.2" rx="1.2" fill="#3E73B8"/>
+  <rect x="39.3" y="110.5" width="5.7" height="3.2" rx="1.2" fill="#3E73B8"/>
+  <rect x="55.1" y="110.5" width="5.7" height="3.2" rx="1.2" fill="#3E73B8"/>
+  <rect x="23.5" y="122.4" width="5.7" height="3.2" rx="1.2" fill="#3E73B8"/>
+  <rect x="39.3" y="122.4" width="5.7" height="3.2" rx="1.2" fill="#3E73B8"/>
+  <rect x="55.1" y="122.4" width="5.7" height="3.2" rx="1.2" fill="#3E73B8"/>
+  <rect x="22.2" y="136.9" width="6.7" height="3.8" rx="1.2" fill="#F4F2EC"/>
+  <rect x="39.3" y="137.3" width="5.7" height="3.2" rx="1.2" fill="#3E73B8"/>
+  <rect x="54.6" y="136.9" width="6.7" height="3.8" rx="1.2" fill="#F4F2EC"/>
+  <!-- TAP TEMPO, UNDO SEQ, ERASE, LOCATE -->
+  <rect x="50.1" y="154.7" width="9.7" height="9.9" rx="2" fill="#F4F2EC"/>
+  <rect x="44.1" y="178.4" width="7.5" height="5.2" rx="1.2" fill="#F4F2EC"/>
+  <rect x="58.3" y="178.4" width="7.7" height="5.2" rx="1.2" fill="#F4F2EC"/>
+  <rect x="44.1" y="197.3" width="7.7" height="5.4" rx="1.2" fill="#F4F2EC"/>
+  <rect x="58.3" y="197.3" width="7.7" height="5.4" rx="1.2" fill="#F4F2EC"/>
+  <rect x="72.8" y="197.3" width="7.7" height="5.4" rx="1.2" fill="#F4F2EC"/>
+  <rect x="87.2" y="197.3" width="7.7" height="5.4" rx="1.2" fill="#F4F2EC"/>
+  <rect x="101.6" y="197.3" width="7.7" height="5.4" rx="1.2" fill="#F4F2EC"/>
+  <!-- CURSOR -->
+  <rect x="80.7" y="162.1" width="21.1" height="21.4" rx="1.5" fill="#BDB7AA"/>
+  <rect x="81.4" y="163.3" width="4.2" height="19.4" rx="1.2" fill="#F4F2EC"/>
+  <rect x="86.4" y="163.3" width="9.5" height="9.3" rx="1.2" fill="#F4F2EC"/>
+  <rect x="86.4" y="173.4" width="9.5" height="9.3" rx="1.2" fill="#F4F2EC"/>
+  <rect x="96.7" y="163.3" width="4.2" height="19.4" rx="1.2" fill="#F4F2EC"/>
+  <!-- AFTER -->
+  <rect x="21.7" y="162.6" width="7.9" height="4.7" rx="1.2" fill="#F4F2EC"/>
+  <!-- Transport -->
+  <rect x="42.8" y="216.8" width="10.0" height="10.8" rx="2" fill="#E2584E"/>
+  <rect x="57.0" y="216.8" width="10.0" height="10.8" rx="2" fill="#E2584E"/>
+  <rect x="71.8" y="216.8" width="10.0" height="10.8" rx="2" fill="#F4F2EC"/>
+  <rect x="86.4" y="216.8" width="10.0" height="10.8" rx="2" fill="#F4F2EC"/>
+  <rect x="100.8" y="216.8" width="10.0" height="10.8" rx="2" fill="#F4F2EC"/>
+  <!-- 4x4 pads -->
+  <rect x="139" y="96" width="107" height="132" rx="6" fill="#A3AAAB"/>
+  <g fill="#6E7272">
+    <rect x="145" y="102" width="21" height="26" rx="3"/>
+    <rect x="170" y="102" width="21" height="26" rx="3"/>
+    <rect x="195" y="102" width="21" height="26" rx="3"/>
+    <rect x="220" y="102" width="21" height="26" rx="3"/>
+    <rect x="145" y="132" width="21" height="26" rx="3"/>
+    <rect x="170" y="132" width="21" height="26" rx="3"/>
+    <rect x="195" y="132" width="21" height="26" rx="3"/>
+    <rect x="220" y="132" width="21" height="26" rx="3"/>
+    <rect x="145" y="162" width="21" height="26" rx="3"/>
+    <rect x="170" y="162" width="21" height="26" rx="3"/>
+    <rect x="195" y="162" width="21" height="26" rx="3"/>
+    <rect x="220" y="162" width="21" height="26" rx="3"/>
+    <rect x="145" y="192" width="21" height="26" rx="3"/>
+    <rect x="170" y="192" width="21" height="26" rx="3"/>
+    <rect x="195" y="192" width="21" height="26" rx="3"/>
+    <rect x="220" y="192" width="21" height="26" rx="3"/>
+  </g>
+  </g>
+</svg>
