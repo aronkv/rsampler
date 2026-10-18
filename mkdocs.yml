@@ -3,7 +3,6 @@ site_description: A desktop sampler inspired by the Akai MPC2000XL, written in p
 site_url: https://aronkv.github.io/rsampler/
 repo_url: https://github.com/aronkv/rsampler
 repo_name: aronkv/rsampler
-edit_uri: edit/main/docs/
 
 nav:
   - Home: index.md
@@ -44,7 +43,6 @@ theme:
     - search.suggest
     - search.highlight
     - content.code.copy
-    - content.action.edit
 
 extra:
   generator: false

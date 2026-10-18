@@ -191,3 +191,12 @@ html {
 .md-search__inner:has(.md-search__input:placeholder-shown) .md-search-result__meta {
   display: none;
 }
+
+/* The navigation starts where it stays, so it does not slide up when the page scrolls. */
+.md-main__inner {
+  margin-top: 0;
+}
+
+.md-content {
+  padding-top: 1.5rem;
+}
