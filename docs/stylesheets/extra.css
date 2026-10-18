@@ -160,12 +160,40 @@
   animation: rise 0.35s ease-out both;
 }
 
+/* Back to top glides up, and its arrow nudges upwards under the mouse. */
+html {
+  scroll-behavior: smooth;
+}
+
+@keyframes nudge {
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.md-top {
+  transition: opacity 0.25s, transform 0.25s cubic-bezier(0.1, 0.7, 0.1, 1), color 0.2s, background-color 0.2s;
+}
+
+.md-top:hover {
+  color: var(--md-default-bg-color);
+  background-color: var(--md-typeset-a-color);
+}
+
+.md-top:hover svg {
+  animation: nudge 0.6s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation: none !important;
     transition: none !important;
+  }
+
+  html {
+    scroll-behavior: auto;
   }
 }
 
