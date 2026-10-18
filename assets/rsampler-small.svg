@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- The icon at 16 and 24 px: only the LCD, the DATA wheel and the pads, which stay readable. -->
+  <rect x="0.5" y="0.5" width="23" height="23" rx="4" fill="#E6E1D6" stroke="#4A4C50"/>
+  <rect x="3" y="3" width="10" height="7" rx="1" fill="#2B2D31"/>
+  <rect x="4" y="4" width="8" height="5" fill="#45BACB"/>
+  <circle cx="8" cy="16" r="4" fill="#2B2D31"/>
+  <rect x="14" y="10" width="7" height="11" rx="1" fill="#2B2D31"/>
+  <g fill="#9BA2A3">
+    <rect x="15" y="11" width="2" height="2.5"/>
+    <rect x="18" y="11" width="2" height="2.5"/>
+    <rect x="15" y="14.5" width="2" height="2.5"/>
+    <rect x="18" y="14.5" width="2" height="2.5"/>
+    <rect x="15" y="18" width="2" height="2"/>
+    <rect x="18" y="18" width="2" height="2"/>
+  </g>
+  <rect x="15" y="3.5" width="6" height="2" rx="1" fill="#C8372F"/>
+</svg>

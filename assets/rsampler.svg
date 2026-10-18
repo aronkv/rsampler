@@ -13,6 +13,8 @@
   <!-- Panel -->
   <rect x="8" y="12" width="240" height="232" rx="30" fill="#BDB7AA"/>
   <rect x="8" y="8" width="240" height="232" rx="30" fill="url(#body)"/>
+  <!-- Everything on the panel, shrunk towards the middle for a wide margin -->
+  <g transform="translate(128 124) scale(0.8) translate(-128 -124)">
   <!-- LCD in its dark frame -->
   <rect x="23.7" y="12.3" width="101.8" height="50.6" rx="4" fill="#2B2D31"/>
   <rect x="31.1" y="17.7" width="87.6" height="35.2" rx="2" fill="url(#lcd)"/>
@@ -109,5 +111,6 @@
     <rect x="170" y="192" width="21" height="26" rx="3"/>
     <rect x="195" y="192" width="21" height="26" rx="3"/>
     <rect x="220" y="192" width="21" height="26" rx="3"/>
+  </g>
   </g>
 </svg>
