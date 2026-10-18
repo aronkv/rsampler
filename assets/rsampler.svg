@@ -1,32 +1,51 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
   <defs>
     <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#F3F0E9"/>
-      <stop offset="1" stop-color="#D6D1C6"/>
+      <stop offset="0" stop-color="#EEEAE1"/>
+      <stop offset="1" stop-color="#D5D0C4"/>
+    </linearGradient>
+    <linearGradient id="lcd" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4FC3D3"/>
+      <stop offset="1" stop-color="#36A6B7"/>
     </linearGradient>
   </defs>
-  <rect x="16" y="16" width="224" height="224" rx="52" fill="url(#body)"/>
-  <rect x="110" y="48" width="122" height="160" rx="12" fill="#A7AEAF"/>
-  <rect x="120" y="60" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="146" y="60" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="172" y="60" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="198" y="60" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="120" y="94" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="146" y="94" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="172" y="94" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="198" y="94" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="120" y="128" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="146" y="128" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="172" y="128" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="198" y="128" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="120" y="162" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="146" y="162" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="172" y="162" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="198" y="162" width="22" height="28" rx="5" fill="#6F7373"/>
-  <rect x="34" y="52" width="66" height="32" rx="6" fill="#2B2D31"/>
-  <rect x="39" y="57" width="56" height="22" rx="3" fill="#45BACB"/>
-  <circle cx="67" cy="140" r="28" fill="#2B2D31"/>
-  <circle cx="67" cy="140" r="19" fill="#43454A"/>
-  <circle cx="76" cy="131" r="5" fill="#2B2D31"/>
-  <rect x="47" y="186" width="40" height="16" rx="4" fill="#D9443A"/>
+  <!-- Panel -->
+  <rect x="8" y="12" width="240" height="232" rx="34" fill="#BDB7AA"/>
+  <rect x="8" y="8" width="240" height="232" rx="34" fill="url(#body)"/>
+  <!-- LCD in its dark frame -->
+  <rect x="22" y="24" width="110" height="62" rx="9" fill="#2B2D31"/>
+  <rect x="30" y="32" width="94" height="46" rx="4" fill="url(#lcd)"/>
+  <rect x="37" y="40" width="48" height="5" rx="2.5" fill="#1F6F7A" opacity="0.75"/>
+  <rect x="37" y="51" width="70" height="5" rx="2.5" fill="#1F6F7A" opacity="0.75"/>
+  <rect x="37" y="62" width="36" height="5" rx="2.5" fill="#1F6F7A" opacity="0.75"/>
+  <!-- Logo -->
+  <rect x="146" y="34" width="84" height="14" rx="7" fill="#C8372F"/>
+  <rect x="146" y="58" width="84" height="5" rx="2.5" fill="#55575A" opacity="0.6"/>
+  <!-- DATA wheel -->
+  <circle cx="74" cy="146" r="38" fill="#2B2D31"/>
+  <circle cx="74" cy="146" r="27" fill="#404247"/>
+  <circle cx="86" cy="134" r="6" fill="#26282B"/>
+  <!-- REC / OVERDUB -->
+  <rect x="26" y="202" width="40" height="26" rx="5" fill="#E2584E"/>
+  <rect x="78" y="202" width="40" height="26" rx="5" fill="#E2584E"/>
+  <!-- 4x4 pads -->
+  <rect x="136" y="82" width="104" height="150" rx="10" fill="#A3AAAB"/>
+  <g fill="#6E7272">
+    <rect x="143" y="89" width="20" height="30" rx="4"/>
+    <rect x="167" y="89" width="20" height="30" rx="4"/>
+    <rect x="191" y="89" width="20" height="30" rx="4"/>
+    <rect x="215" y="89" width="20" height="30" rx="4"/>
+    <rect x="143" y="124" width="20" height="30" rx="4"/>
+    <rect x="167" y="124" width="20" height="30" rx="4"/>
+    <rect x="191" y="124" width="20" height="30" rx="4"/>
+    <rect x="215" y="124" width="20" height="30" rx="4"/>
+    <rect x="143" y="159" width="20" height="30" rx="4"/>
+    <rect x="167" y="159" width="20" height="30" rx="4"/>
+    <rect x="191" y="159" width="20" height="30" rx="4"/>
+    <rect x="215" y="159" width="20" height="30" rx="4"/>
+    <rect x="143" y="194" width="20" height="30" rx="4"/>
+    <rect x="167" y="194" width="20" height="30" rx="4"/>
+    <rect x="191" y="194" width="20" height="30" rx="4"/>
+    <rect x="215" y="194" width="20" height="30" rx="4"/>
+  </g>
 </svg>
