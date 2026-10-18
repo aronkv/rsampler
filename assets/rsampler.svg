@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- A small picture of the app, laid out in its proportions. -->
   <defs>
     <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#EEEAE1"/>
@@ -10,42 +11,60 @@
     </linearGradient>
   </defs>
   <!-- Panel -->
-  <rect x="8" y="12" width="240" height="232" rx="34" fill="#BDB7AA"/>
-  <rect x="8" y="8" width="240" height="232" rx="34" fill="url(#body)"/>
+  <rect x="8" y="12" width="240" height="232" rx="30" fill="#BDB7AA"/>
+  <rect x="8" y="8" width="240" height="232" rx="30" fill="url(#body)"/>
   <!-- LCD in its dark frame -->
-  <rect x="22" y="24" width="110" height="62" rx="9" fill="#2B2D31"/>
-  <rect x="30" y="32" width="94" height="46" rx="4" fill="url(#lcd)"/>
-  <rect x="37" y="40" width="48" height="5" rx="2.5" fill="#1F6F7A" opacity="0.75"/>
-  <rect x="37" y="51" width="70" height="5" rx="2.5" fill="#1F6F7A" opacity="0.75"/>
-  <rect x="37" y="62" width="36" height="5" rx="2.5" fill="#1F6F7A" opacity="0.75"/>
-  <!-- Logo -->
-  <rect x="146" y="34" width="84" height="14" rx="7" fill="#C8372F"/>
-  <rect x="146" y="58" width="84" height="5" rx="2.5" fill="#55575A" opacity="0.6"/>
+  <rect x="22" y="18" width="104" height="52" rx="6" fill="#2B2D31"/>
+  <rect x="29" y="24" width="90" height="36" rx="3" fill="url(#lcd)"/>
+  <rect x="34" y="30" width="44" height="4" rx="2" fill="#1F6F7A" opacity="0.75"/>
+  <rect x="34" y="38" width="62" height="4" rx="2" fill="#1F6F7A" opacity="0.75"/>
+  <rect x="34" y="46" width="32" height="4" rx="2" fill="#1F6F7A" opacity="0.75"/>
+  <!-- Logo and DRUM SAMPLER legend -->
+  <rect x="140" y="27" width="40" height="10" rx="5" fill="#C8372F"/>
+  <rect x="190" y="27" width="52" height="5" rx="2.5" fill="#55575A" opacity="0.7"/>
+  <rect x="186" y="35" width="56" height="2" fill="#55575A" opacity="0.7"/>
+  <!-- Top right controls: level keys, REC GAIN and MAIN VOLUME, PAD BANK -->
+  <rect x="139" y="45" width="107" height="47" rx="5" fill="#A3AAAB"/>
+  <rect x="144" y="50" width="38" height="18" rx="3" fill="#E4E1D9"/>
+  <rect x="144" y="70" width="38" height="18" rx="3" fill="#E4E1D9"/>
+  <circle cx="199" cy="59" r="7.5" fill="#2B2D31"/>
+  <circle cx="199" cy="59" r="5.5" fill="#EBA3A6"/>
+  <circle cx="225" cy="59" r="7.5" fill="#2B2D31"/>
+  <circle cx="225" cy="59" r="5.5" fill="#F4F2EC"/>
+  <rect x="189" y="78" width="10" height="7" rx="1.5" fill="#F4F2EC"/>
+  <rect x="203" y="78" width="10" height="7" rx="1.5" fill="#F4F2EC"/>
+  <rect x="217" y="78" width="10" height="7" rx="1.5" fill="#F4F2EC"/>
+  <rect x="231" y="78" width="10" height="7" rx="1.5" fill="#F4F2EC"/>
   <!-- DATA wheel -->
-  <circle cx="74" cy="146" r="38" fill="#2B2D31"/>
-  <circle cx="74" cy="146" r="27" fill="#404247"/>
-  <circle cx="86" cy="134" r="6" fill="#26282B"/>
+  <circle cx="91" cy="128" r="24" fill="#2B2D31"/>
+  <circle cx="91" cy="128" r="17" fill="#404247"/>
+  <circle cx="98" cy="121" r="4" fill="#26282B"/>
+  <!-- NOTE VARIATION slider -->
+  <rect x="16" y="146" width="21" height="82" rx="2" fill="none" stroke="#3A3C40" stroke-width="2"/>
+  <rect x="25" y="154" width="3" height="66" rx="1.5" fill="#2B2D31"/>
+  <rect x="19" y="194" width="15" height="8" rx="2" fill="#F4F2EC"/>
+  <rect x="19" y="197" width="15" height="2" fill="#3E73B8"/>
   <!-- REC / OVERDUB -->
-  <rect x="26" y="202" width="40" height="26" rx="5" fill="#E2584E"/>
-  <rect x="78" y="202" width="40" height="26" rx="5" fill="#E2584E"/>
+  <rect x="44" y="214" width="14" height="12" rx="2.5" fill="#E2584E"/>
+  <rect x="63" y="214" width="14" height="12" rx="2.5" fill="#E2584E"/>
   <!-- 4x4 pads -->
-  <rect x="136" y="108" width="104" height="118" rx="10" fill="#A3AAAB"/>
+  <rect x="139" y="96" width="107" height="132" rx="6" fill="#A3AAAB"/>
   <g fill="#6E7272">
-    <rect x="143" y="115" width="20" height="23" rx="4"/>
-    <rect x="167" y="115" width="20" height="23" rx="4"/>
-    <rect x="191" y="115" width="20" height="23" rx="4"/>
-    <rect x="215" y="115" width="20" height="23" rx="4"/>
-    <rect x="143" y="142" width="20" height="23" rx="4"/>
-    <rect x="167" y="142" width="20" height="23" rx="4"/>
-    <rect x="191" y="142" width="20" height="23" rx="4"/>
-    <rect x="215" y="142" width="20" height="23" rx="4"/>
-    <rect x="143" y="169" width="20" height="23" rx="4"/>
-    <rect x="167" y="169" width="20" height="23" rx="4"/>
-    <rect x="191" y="169" width="20" height="23" rx="4"/>
-    <rect x="215" y="169" width="20" height="23" rx="4"/>
-    <rect x="143" y="196" width="20" height="23" rx="4"/>
-    <rect x="167" y="196" width="20" height="23" rx="4"/>
-    <rect x="191" y="196" width="20" height="23" rx="4"/>
-    <rect x="215" y="196" width="20" height="23" rx="4"/>
+    <rect x="145" y="102" width="21" height="26" rx="3"/>
+    <rect x="170" y="102" width="21" height="26" rx="3"/>
+    <rect x="195" y="102" width="21" height="26" rx="3"/>
+    <rect x="220" y="102" width="21" height="26" rx="3"/>
+    <rect x="145" y="132" width="21" height="26" rx="3"/>
+    <rect x="170" y="132" width="21" height="26" rx="3"/>
+    <rect x="195" y="132" width="21" height="26" rx="3"/>
+    <rect x="220" y="132" width="21" height="26" rx="3"/>
+    <rect x="145" y="162" width="21" height="26" rx="3"/>
+    <rect x="170" y="162" width="21" height="26" rx="3"/>
+    <rect x="195" y="162" width="21" height="26" rx="3"/>
+    <rect x="220" y="162" width="21" height="26" rx="3"/>
+    <rect x="145" y="192" width="21" height="26" rx="3"/>
+    <rect x="170" y="192" width="21" height="26" rx="3"/>
+    <rect x="195" y="192" width="21" height="26" rx="3"/>
+    <rect x="220" y="192" width="21" height="26" rx="3"/>
   </g>
 </svg>
