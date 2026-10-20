@@ -34,8 +34,9 @@ LCD (**F1–F6**) do what the labels above them say.
 
 - **Cursor**: arrow keys or the **CURSOR** buttons. You can also click a field on the LCD.
 - **DATA wheel**: drag or scroll over the wheel, scroll over the LCD, or press <kbd>+</kbd> /
-  <kbd>-</kbd>. Hold <kbd>Shift</kbd> for fine steps (0.1 BPM tempo, 0.1 semitone tuning, single
-  frames in a sound).
+  <kbd>-</kbd>. Hold <kbd>Shift</kbd> while turning the wheel or pressing <kbd>-</kbd> for fine
+  steps (0.1 BPM tempo, 0.1 semitone tuning, single frames in a sound). <kbd>+</kbd> always takes a
+  full step, since most keyboards need Shift to type it.
 - **MAIN SCREEN** (<kbd>Esc</kbd>) always takes you back to the sequencer.
 - **OPEN WINDOW** (<kbd>Ctrl</kbd>+<kbd>Enter</kbd>) opens the extra settings of the field under the
   cursor, where it has any.

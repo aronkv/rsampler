@@ -5,7 +5,8 @@
 1. Hit the pad you want to load into.
 2. Press **LOAD** (the blue **3** key, <kbd>Ctrl</kbd>+<kbd>3</kbd>). The browser opens in
    `~/Music`.
-3. Move with the arrow keys or the **DATA** wheel.
+3. Move with the arrow keys, the **DATA** wheel or by scrolling over the LCD; <kbd>Page Up</kbd> /
+   <kbd>Page Down</kbd> move ten files, <kbd>Home</kbd> / <kbd>End</kbd> to the first and last.
 4. <kbd>Enter</kbd>, **→**, **ENTER** or **F6** opens a folder, or loads the sound into the pad and
    plays it. The pad keeps its settings (tuning, envelope, mixer); only the sound changes.
 5. <kbd>Backspace</kbd>, **←** or **F1** goes up a folder.
@@ -13,10 +14,12 @@
 **PLAY** (F5) listens to the selected sound file without loading it; **STOP** or leaving the screen
 stops it.
 
-The browser lists folders and the files rsampler can load; hidden files and folders (names starting
-with a dot) are left out. These formats load, up to 20 minutes long:
+The browser lists folders and the files rsampler can load (`.wav`, `.mp3`, `.flac`, `.m4a`,
+`.mp4`, `.aac`, `.ogg`, `.oga`, `.aif`, `.aiff`, `.aifc`, and the MPC's `.snd`, `.pgm`, `.aps`,
+`.all`, plus `.mid`); hidden files and folders (names starting with a dot, or marked hidden on
+Windows) are left out. These formats load, up to 20 minutes long:
 
-- WAV: 8, 16, 24 or 32-bit, 32 or 64-bit float, any sample rate
+- WAV: 8, 16, 24 or 32-bit, 32 or 64-bit float, A-law, µ-law and ADPCM, any sample rate
 - MP3, FLAC, M4A or MP4 (AAC or Apple Lossless), AAC, Ogg Vorbis, AIFF and AIFC
 - The MPC2000XL's own `.SND` sounds, with their trim points, loop and tuning, so old MPC sound
   libraries can be used directly
@@ -76,8 +79,8 @@ EDIT works on St–End from TRIM, on the loop from LOOP, and on the selected zon
 | DISCARD | Keeps only the section and throws away the rest |
 | LOOP FROM ST TO END | Sets `To` to `St` and turns `Loop` on |
 | SECTION -> NEW SOUND | Copies the section to `To pad` |
-| INSERT SOUND -> SECTION START | Puts the sound of another pad (`Sound of pad`) in at the start of the section, e.g. to join two chops |
-| DELETE SECTION | Cuts the section out |
+| INSERT SOUND -> SECTION START | Puts the whole sound of another pad (`Sound of pad`) in at the start of the section, e.g. to join two chops |
+| DELETE SECTION | Cuts the section out. Deleting St–End itself leaves St–End on the rest of the sound |
 | SILENCE SECTION | Makes the section silent |
 | REVERSE SECTION | Plays the section backwards |
 | TIME STRETCH | Puts the section on `To pad` made longer or shorter at the same pitch: `Ratio` is the new length, 50–200 % (1 % a step, 0.1 % with Shift). Sections shorter than 80 ms are copied unchanged |

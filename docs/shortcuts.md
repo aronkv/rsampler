@@ -12,8 +12,9 @@
 | <kbd>Delete</kbd> (hold) | ERASE |
 | <kbd>T</kbd> | TAP TEMPO (stopped), NOTE REPEAT (held while playing) |
 | <kbd>,</kbd> / <kbd>.</kbd> | STEP < / > |
-| <kbd>Page Up</kbd> / <kbd>Page Down</kbd> | BAR << / >> |
-| <kbd>Home</kbd> | GO TO start |
+| <kbd>Page Up</kbd> / <kbd>Page Down</kbd> | BAR << / >> (in the LOAD and SAVE lists: ten files up or down) |
+| <kbd>Home</kbd> | GO TO start (in the LOAD and SAVE lists: the first file) |
+| <kbd>End</kbd> | In the LOAD and SAVE lists: the last file |
 | <kbd>F1</kbd>–<kbd>F6</kbd> | Soft keys |
 | <kbd>F7</kbd> / <kbd>F8</kbd> | FULL LEVEL / 16 LEVELS |
 | <kbd>F9</kbd> / <kbd>F10</kbd> | NEXT SEQ / TRACK MUTE |
