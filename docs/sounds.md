@@ -15,19 +15,20 @@
 stops it.
 
 The browser lists folders and the files rsampler can load (`.wav`, `.mp3`, `.flac`, `.m4a`,
-`.mp4`, `.aac`, `.ogg`, `.oga`, `.aif`, `.aiff`, `.aifc`, and the MPC's `.snd`, `.pgm`, `.aps`,
+`.mp4`, `.aac`, `.ogg`, `.oga`, `.opus`, `.aif`, `.aiff`, `.aifc`, and the MPC's `.snd`, `.pgm`, `.aps`,
 `.all`, plus `.mid`); hidden files and folders (names starting with a dot, or marked hidden on
-Windows) are left out. These formats load, up to 20 minutes long:
+Windows) are left out. Names are sorted ignoring accents, with numbers in order (`KICK2` before
+`KICK10`). These formats load, up to 20 minutes long:
 
-- WAV: 8, 16, 24 or 32-bit, 32 or 64-bit float, A-law, µ-law and ADPCM, any sample rate
-- MP3, FLAC, M4A or MP4 (AAC or Apple Lossless), AAC, Ogg Vorbis, AIFF and AIFC
+- WAV and RF64: 8, 16, 24 or 32-bit, 32 or 64-bit float, A-law, µ-law and ADPCM, any sample rate
+- MP3, FLAC, M4A or MP4 (AAC or Apple Lossless), AAC, Ogg Vorbis, Opus, AIFF and AIFC
 - The MPC2000XL's own `.SND` sounds, with their trim points, loop and tuning, so old MPC sound
   libraries can be used directly
 
 Mono files play on both channels; files with more than two channels keep the first two. A file
-that is cut off part-way loads up to where it ends. Ogg Opus and RF64 files are not supported, and
-loop points saved inside WAV files are not read: set them on the [LOOP](#trim-loop-and-zone)
-screen.
+that is cut off part-way loads up to where it ends. A loop saved in a WAV file (its `smpl` chunk,
+written by other samplers and sound editors) carries over to the [LOOP](#trim-loop-and-zone)
+screen. Emoji in names show as `?` on the LCD.
 
 MPC programs and sequences load from the same screen; see [Files](files.md).
 
@@ -67,7 +68,8 @@ all three, **PLAY X** (F6) plays the highlighted part once, as it is, and **EDIT
   part is lost or played twice. A zone whose `St` and `End` meet is empty, and EDIT refuses to work
   on it. **RESET** (F4) splits it evenly again.
 
-Every point moves by 1/500 of the sound per DATA wheel step, or by single frames with
+Points are shown in frames (samples at the output rate), as on the MPC; `Len` and `Play` are in
+seconds. Every point moves by 1/500 of the sound per DATA wheel step, or by single frames with
 <kbd>Shift</kbd>. `St` always stays at least one frame before `End`.
 
 ## EDIT
@@ -89,7 +91,8 @@ EDIT works on St–End from TRIM, on the loop from LOOP, and on the selected zon
 | SLICE SOUND (ZONE) | Puts every zone on its own pad, from `To pad` on |
 
 **DO IT** (F5) applies it, **CANCEL** (F4) goes back. New sounds are named after the original
-(`KICK-1`, `KICK-2`, … for sections and slices, `KICK-T` stretched, `KICK-R` resampled) and their
+(`KICK-1`, `KICK-2`, … for sections and slices, `KICK-T` stretched, `KICK-R` resampled, with a
+number added when the name is taken: `KICK-T2`) and their
 pads start from the default settings, replacing what was there. **UNDO SEQ**
 (<kbd>Ctrl</kbd>+<kbd>Z</kbd>) on these screens takes back the last edit, and pressed again redoes
 it; there is one step of undo. Edited sounds are saved with the [project](files.md#saving-and-loading-projects).
