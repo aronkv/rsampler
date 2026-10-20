@@ -995,12 +995,19 @@ impl App {
     /// without the audio lock, so playback carries on meanwhile.
     fn process_to_pad(&mut self, range: std::ops::Range<usize>, ratio: u32, from: Section) {
         let (pad, to, op, (fs, bits)) = (self.pad, self.edit_to, self.edit_op, self.edit_resample);
-        let Some((snd, rate)) = self.with(|s| s.pads_mut()[pad].sound.clone().map(|snd| (snd, s.rate))) else {
+        let Some((snd, rate, names)) =
+            self.with(|s| s.pads_mut()[pad].sound.clone().map(|snd| (snd, s.rate, sound_names(s.pads(), to))))
+        else {
             return self.say("No sound on this pad");
         };
         let resample = op == edit::Op::Resample;
         let suffix = if resample { "R" } else { "T" };
-        let name = format!("{}-{suffix}", snd.name.chars().take(13).collect::<String>());
+        let base = format!("{}-{suffix}", snd.name.chars().take(13).collect::<String>());
+        // Doing it again makes KICK-T2, KICK-T3, ...
+        let name = (1..)
+            .map(|n| if n == 1 { base.clone() } else { format!("{base}{n}") })
+            .find(|n| !names.contains(n))
+            .unwrap_or(base);
         let part = edit::section(&snd, range, name);
         let frames = if resample {
             edit::crush(&part.frames, rate, fs, bits)
@@ -1107,8 +1114,16 @@ impl App {
             }
             // MPC names stay within 16 characters.
             let base: String = snd.name.chars().take(13).collect();
+            // A single new sound takes the next free number, KICK-1, KICK-2, ...; slices are
+            // numbered in order.
+            let names = sound_names(s.pads(), to);
+            let first = if ranges.len() == 1 {
+                (1..).find(|n| !names.contains(&format!("{base}-{n}"))).unwrap_or(1)
+            } else {
+                1
+            };
             for (i, r) in ranges.iter().enumerate() {
-                let name = format!("{base}-{}", i + 1);
+                let name = format!("{base}-{}", first + i);
                 let target = &mut s.pads_mut()[to + i];
                 *target = program::Pad { sound: Some(edit::section(&snd, r.clone(), name)), ..program::Pad::default() };
             }
@@ -2738,6 +2753,15 @@ fn scroll_points(ui: &Ui, scale: f32) -> f32 {
             })
             .sum()
     })
+}
+
+/// The names of the sounds on `pads`, leaving out pad `except`, which is about to be replaced.
+fn sound_names(pads: &[program::Pad], except: usize) -> Vec<String> {
+    pads.iter()
+        .enumerate()
+        .filter(|(i, _)| *i != except)
+        .filter_map(|(_, p)| p.sound.as_ref().map(|s| s.name.clone()))
+        .collect()
 }
 
 /// Text as the LCD shows it: emoji, which would be drawn in their own colours, become `?` like
