@@ -2739,7 +2739,8 @@ fn frame_step(len: usize, fine: bool) -> i64 {
 
 /// TRIM, LOOP and ZONE waveform: `range` drawn dark, the rest faded, a line at each mark.
 fn wave(st: &Shared, pad: usize, painter: &egui::Painter, p: &Panel, range: std::ops::Range<usize>, marks: &[usize]) {
-    let Some(snd) = &st.pads()[pad].sound else { return };
+    // A sound without frames has no waveform to draw.
+    let Some(snd) = st.pads()[pad].sound.as_ref().filter(|s| !s.frames.is_empty()) else { return };
     let s = p.scale;
     let (top, height) = (80.0, 48.0);
     let mid = top + height / 2.0;
