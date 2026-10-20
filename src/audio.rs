@@ -34,6 +34,8 @@ pub enum Hit {
     Off {
         key: u16,
     },
+    /// STOP pressed while stopped: every sound still ringing fades out.
+    AllOff,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -339,8 +341,10 @@ impl Shared {
         self.hits.push(Hit::StopAudition);
         self.t.song = None;
         if !self.t.playing {
-            // Pressing STOP while stopped returns to the start, like the hardware.
+            // Pressing STOP while stopped returns to the start, like the hardware, and silences
+            // what is still sounding, such as a looping pad.
             self.locate(0);
+            self.hits.push(Hit::AllOff);
             self.t.rec = RecMode::Off;
             return;
         }
@@ -671,6 +675,12 @@ impl Shared {
             }
             Hit::StopAudition => voices.cut(AUDITION),
             Hit::Off { key } => voices.release(key),
+            Hit::AllOff => {
+                let keys: Vec<u16> = voices.voices.iter().map(|v| v.key).collect();
+                for key in keys {
+                    voices.release(key);
+                }
+            }
             Hit::Release { pad } => {
                 self.t.held[pad as usize] = None;
                 self.t.erasing[pad as usize] = false;
@@ -1521,6 +1531,20 @@ mod tests {
             s.programs[0].pads[pad].sound = Some(sound);
         }
         (s, v)
+    }
+
+    #[test]
+    fn stop_while_stopped_silences_a_held_loop() {
+        let (mut s, mut v) = with_kit(48_000);
+        let frames: Frames = vec![[0.5; 2]; 4800].into();
+        s.programs[0].pads[5].sound = Some(Sound { looping: true, ..Sound::new("L", frames) });
+        s.hits.push(Hit::Press { pad: 5, velocity: 127, var: None });
+        // Held, it loops for as long as it is not released.
+        run(&mut s, &mut v, 48_000);
+        assert!(run(&mut s, &mut v, 100) > 0.1);
+        s.stop();
+        run(&mut s, &mut v, 48_000);
+        assert_eq!(run(&mut s, &mut v, 100), 0.0);
     }
 
     #[test]
