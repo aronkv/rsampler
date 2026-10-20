@@ -1172,13 +1172,26 @@ pub fn write_wav(path: &Path, frames: &[[f32; 2]], rate: u32) -> Result<(), houn
 }
 
 /// Music and sound files besides WAV that `load_audio` reads.
-pub const AUDIO_EXTENSIONS: [&str; 10] = ["wav", "mp3", "flac", "m4a", "aac", "mp4", "ogg", "oga", "aif", "aiff"];
+pub const AUDIO_EXTENSIONS: [&str; 11] =
+    ["wav", "mp3", "flac", "m4a", "aac", "mp4", "ogg", "oga", "aif", "aiff", "aifc"];
 
 /// Loads a sound file as stereo frames resampled to `rate`: WAV, MP3, FLAC, M4A/AAC/ALAC,
 /// Ogg Vorbis or AIFF. Mono becomes both channels; more than two channels keep the first two.
 pub fn load_audio(path: &Path, rate: u32) -> Result<Frames, String> {
-    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")) {
-        return load_wav(path, rate).map_err(|e| e.to_string());
+    // ponytail: decodes the whole file into memory; 20 minutes at 48 kHz is about 460 MB of frames,
+    // so longer files are refused rather than streamed.
+    const MAX_SECONDS: usize = 20 * 60;
+    // Most WAV files are read directly; those it cannot read (64-bit float, RF64, unusual chunks,
+    // a cut-off end) go through the decoder below like the other formats.
+    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav"))
+        && let Ok(reader) = hound::WavReader::open(path)
+    {
+        if reader.duration() as usize > MAX_SECONDS * reader.spec().sample_rate as usize {
+            return Err("Longer than 20 minutes".to_owned());
+        }
+        if let Ok(frames) = load_wav(path, rate) {
+            return Ok(frames);
+        }
     }
     use symphonia::core::codecs::audio::AudioDecoderOptions;
     use symphonia::core::errors::Error as DecodeError;
@@ -1209,15 +1222,14 @@ pub fn load_audio(path: &Path, rate: u32) -> Result<Frames, String> {
     let aac_delay = params.codec == symphonia::core::codecs::audio::well_known::CODEC_ID_AAC && track.delay.is_none();
     let (skip, length) = if aac_delay { (1024, track.num_frames.map(|n| n.saturating_sub(1024))) } else { (0, None) };
     let track_id = track.id;
-    // ponytail: decodes the whole file into memory; 20 minutes at 48 kHz is about 460 MB of frames,
-    // so longer files are refused rather than streamed.
-    const MAX_SECONDS: usize = 20 * 60;
     let (mut frames, mut from, mut buf) = (Vec::new(), 0u32, Vec::<f32>::new());
     loop {
         let packet = match format.next_packet() {
             Ok(Some(packet)) => packet,
             Ok(None) => break,
             Err(DecodeError::ResetRequired) => break,
+            // A file cut off mid-way plays up to where it ends, as players do.
+            Err(DecodeError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(e) => return Err(e.to_string()),
         };
         if packet.track_id != track_id {
@@ -1845,6 +1857,38 @@ mod tests {
         }
         std::fs::write(dir.join("bad.mp3"), b"not audio").unwrap();
         assert!(load_audio(&dir.join("bad.mp3"), 48_000).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn unusual_wavs_still_load() {
+        let dir = std::env::temp_dir().join(format!("rsampler-wav64-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Mono 64-bit float, 100 frames of 0.5, which the plain WAV reader refuses.
+        let data: Vec<u8> = (0..100).flat_map(|_| 0.5f64.to_le_bytes()).collect();
+        let mut b = b"RIFF".to_vec();
+        b.extend((36 + data.len() as u32).to_le_bytes());
+        b.extend(b"WAVEfmt ");
+        b.extend(16u32.to_le_bytes());
+        for v in [3u16, 1] {
+            b.extend(v.to_le_bytes());
+        }
+        b.extend(48_000u32.to_le_bytes());
+        b.extend((48_000u32 * 8).to_le_bytes());
+        for v in [8u16, 64] {
+            b.extend(v.to_le_bytes());
+        }
+        b.extend(b"data");
+        b.extend((data.len() as u32).to_le_bytes());
+        b.extend(&data);
+        let path = dir.join("f64.wav");
+        std::fs::write(&path, &b).unwrap();
+        let frames = load_audio(&path, 48_000).unwrap();
+        assert_eq!(frames.len(), 100);
+        assert!(frames.iter().all(|f| *f == [0.5, 0.5]));
+        // Cut off halfway: the part that is there loads.
+        std::fs::write(&path, &b[..b.len() - 400]).unwrap();
+        assert_eq!(load_audio(&path, 48_000).unwrap().len(), 50);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
