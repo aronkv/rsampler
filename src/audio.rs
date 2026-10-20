@@ -1172,8 +1172,8 @@ pub fn write_wav(path: &Path, frames: &[[f32; 2]], rate: u32) -> Result<(), houn
 }
 
 /// Music and sound files besides WAV that `load_audio` reads.
-pub const AUDIO_EXTENSIONS: [&str; 11] =
-    ["wav", "mp3", "flac", "m4a", "aac", "mp4", "ogg", "oga", "aif", "aiff", "aifc"];
+pub const AUDIO_EXTENSIONS: [&str; 12] =
+    ["wav", "mp3", "flac", "m4a", "aac", "mp4", "ogg", "oga", "opus", "aif", "aiff", "aifc"];
 
 /// Loads a sound file as stereo frames resampled to `rate`: WAV, MP3, FLAC, M4A/AAC/ALAC,
 /// Ogg Vorbis or AIFF. Mono becomes both channels; more than two channels keep the first two.
@@ -1212,15 +1212,33 @@ pub fn load_audio(path: &Path, rate: u32) -> Result<Frames, String> {
         .map_err(unsupported)?;
     let track = format.default_track(TrackType::Audio).ok_or("No audio in this file")?;
     let params = track.codec_params.as_ref().and_then(|p| p.audio()).ok_or("No audio in this file")?;
-    let mut decoder = symphonia::default::get_codecs()
-        .make_audio_decoder(params, &AudioDecoderOptions::default())
-        .map_err(|_| "This file's codec is not supported".to_owned())?;
+    let opus = params.codec == symphonia::core::codecs::audio::well_known::CODEC_ID_OPUS;
+    let mut decoder = if opus {
+        opus_decoder(params.extra_data.as_deref())?
+    } else {
+        Decoder::Symphonia(
+            symphonia::default::get_codecs()
+                .make_audio_decoder(params, &AudioDecoderOptions::default())
+                .map_err(|_| "This file's codec is not supported".to_owned())?,
+        )
+    };
     // AAC in MP4 starts with 1024 frames of encoder delay that the MP4 reader leaves in (it is
     // only signalled in the edit list), which would make a drum hit start late. Other formats
     // trim theirs while decoding.
     // ponytail: assumes the usual 1024; files with another delay (iTunes uses 2112) keep the rest.
     let aac_delay = params.codec == symphonia::core::codecs::audio::well_known::CODEC_ID_AAC && track.delay.is_none();
-    let (skip, length) = if aac_delay { (1024, track.num_frames.map(|n| n.saturating_sub(1024))) } else { (0, None) };
+    // Opus leaves its pre-skip, given in the file, to the decoder.
+    let delay = if aac_delay {
+        Some(1024)
+    } else if opus {
+        track.delay
+    } else {
+        None
+    };
+    let (skip, length) = match delay {
+        Some(d) => (d as usize, track.num_frames.map(|n| n.saturating_sub(d as u64))),
+        None => (0, None),
+    };
     let track_id = track.id;
     let (mut frames, mut from, mut buf) = (Vec::new(), 0u32, Vec::<f32>::new());
     loop {
@@ -1235,16 +1253,34 @@ pub fn load_audio(path: &Path, rate: u32) -> Result<Frames, String> {
         if packet.track_id != track_id {
             continue;
         }
-        let audio = match decoder.decode(&packet) {
-            Ok(audio) => audio,
-            // A damaged frame is skipped, as players do.
-            Err(DecodeError::DecodeError(_)) => continue,
-            Err(e) => return Err(e.to_string()),
+        let (channels, r) = match &mut decoder {
+            Decoder::Symphonia(decoder) => {
+                let audio = match decoder.decode(&packet) {
+                    Ok(audio) => audio,
+                    // A damaged frame is skipped, as players do.
+                    Err(DecodeError::DecodeError(_)) => continue,
+                    Err(e) => return Err(e.to_string()),
+                };
+                buf.resize(audio.samples_interleaved(), 0.0);
+                audio.copy_to_slice_interleaved(&mut buf);
+                (audio.spec().channels().count().max(1), audio.spec().rate())
+            }
+            // Up to 120 ms at 48 kHz in a packet.
+            Decoder::Opus(decoder) => {
+                buf.resize(5760 * 2, 0.0);
+                let Ok(n) = decoder.decode(&packet.data, 5760, &mut buf) else { continue };
+                buf.truncate(n * 2);
+                (2, 48_000)
+            }
+            Decoder::OpusSurround(decoder, channels, right) => {
+                let mut all = vec![0.0; 5760 * *channels];
+                let Ok(n) = decoder.decode(&packet.data, 5760, &mut all) else { continue };
+                buf.clear();
+                buf.extend(all[..n * *channels].chunks_exact(*channels).flat_map(|f| [f[0], f[*right]]));
+                (2, 48_000)
+            }
         };
-        let (channels, r) = (audio.spec().channels().count().max(1), audio.spec().rate());
         from = r;
-        buf.resize(audio.samples_interleaved(), 0.0);
-        audio.copy_to_slice_interleaved(&mut buf);
         frames.extend(buf.chunks_exact(channels).map(|f| if channels == 1 { [f[0], f[0]] } else { [f[0], f[1]] }));
         if frames.len() > MAX_SECONDS * r.max(1) as usize {
             return Err("Longer than 20 minutes".to_owned());
@@ -1258,6 +1294,29 @@ pub fn load_audio(path: &Path, rate: u32) -> Result<Frames, String> {
         return Err("No audio in this file".to_owned());
     }
     Ok(resample(&frames, from, rate).into())
+}
+
+enum Decoder {
+    Symphonia(Box<dyn symphonia::core::codecs::audio::AudioDecoder>),
+    Opus(Box<opus_pure::OpusDecoder>),
+    /// Surround Opus, with its channel count and where the front right is in it.
+    OpusSurround(Box<opus_pure::OpusMSDecoder>, usize, usize),
+}
+
+/// An Opus decoder for a stream's `OpusHead`: stereo out of mono and stereo streams, all channels
+/// of surround ones.
+fn opus_decoder(head: Option<&[u8]>) -> Result<Decoder, String> {
+    let head = head.filter(|h| h.len() >= 19 && h.starts_with(b"OpusHead")).ok_or("Damaged Opus file")?;
+    let (channels, family) = (head[9].max(1) as usize, head[18]);
+    if channels <= 2 && family == 0 {
+        // Mono streams come out on both channels.
+        return Ok(Decoder::Opus(Box::new(opus_pure::OpusDecoder::new(48_000, 2).map_err(|e| e.to_string())?)));
+    }
+    let decoder = opus_pure::OpusMSDecoder::new(48_000, channels, family).map_err(|e| e.to_string())?;
+    // Surround channels are in Vorbis order: front left first, then the centre (except with four
+    // channels) and the front right.
+    let right = if channels == 4 || channels == 2 { 1 } else { 2.min(channels - 1) };
+    Ok(Decoder::OpusSurround(Box::new(decoder), channels, right))
 }
 
 /// Loads a WAV file as stereo frames resampled to `rate`.
@@ -1854,6 +1913,21 @@ mod tests {
             let (a, b) = (load_audio(&wav, 48_000).unwrap(), load_audio(&flac, 48_000).unwrap());
             assert_eq!(a.len(), b.len());
             assert!(a.iter().zip(b.iter()).all(|(x, y)| (x[0] - y[0]).abs() < 1e-3 && (x[1] - y[1]).abs() < 1e-3));
+        }
+        // Opus, which symphonia has no decoder for: same length once its pre-skip is dropped.
+        let opus = dir.join("t.opus");
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-i"])
+            .arg(&wav)
+            .args(["-c:a", "libopus"])
+            .arg(&opus)
+            .status();
+        if made.is_ok_and(|s| s.success()) {
+            let (a, b) = (load_audio(&wav, 48_000).unwrap(), load_audio(&opus, 48_000).unwrap());
+            assert_eq!(a.len(), b.len());
+            // Lossy, so only roughly the same: the left channel's tone still peaks near 0.5.
+            let peak = b[a.len() / 4..a.len() * 3 / 4].iter().fold(0.0f32, |m, f| m.max(f[0].abs()));
+            assert!((peak - 0.5).abs() < 0.1, "opus peak {peak}");
         }
         std::fs::write(dir.join("bad.mp3"), b"not audio").unwrap();
         assert!(load_audio(&dir.join("bad.mp3"), 48_000).is_err());
