@@ -986,7 +986,8 @@ impl Voices {
 
     fn play(&mut self, pads: &[Pad], program: usize, pad: u8, velocity: u8, var: Variation) {
         let Some(p) = pads.get(pad as usize) else { return };
-        let Some(sound) = &p.sound else { return };
+        // A sound without frames (an empty section cut out of one) has nothing to play.
+        let Some(sound) = p.sound.as_ref().filter(|s| !s.frames.is_empty()) else { return };
         // Mute assigns work within the program.
         for m in p.mutes.iter().flatten() {
             self.cut(key(program, *m));
@@ -1004,6 +1005,9 @@ impl Voices {
 
     fn audition(&mut self, sound: &Sound, range: std::ops::Range<usize>) {
         self.cut(AUDITION);
+        if sound.frames.is_empty() {
+            return;
+        }
         let end = range.end.min(sound.frames.len());
         let part = Sound { start: range.start.min(end.saturating_sub(1)), end, looping: false, ..sound.clone() };
         let plain = Pad { decay: 0, ..Pad::default() };
@@ -1350,6 +1354,18 @@ mod tests {
             s.programs[0].pads[pad].sound = Some(sound);
         }
         (s, v)
+    }
+
+    #[test]
+    fn a_sound_without_frames_plays_silence() {
+        let (mut s, mut v) = with_kit(48_000);
+        // What DISCARD leaves of an empty zone of a looping sound.
+        let empty = Sound { looping: true, end: 1, ..Sound::new("E", Vec::new().into()) };
+        s.programs[0].pads[5].sound = Some(empty.clone());
+        s.hits.push(Hit::Press { pad: 5, velocity: 100, var: None });
+        assert_eq!(run(&mut s, &mut v, 100), 0.0);
+        v.audition(&empty, 0..1);
+        assert_eq!(run(&mut s, &mut v, 100), 0.0);
     }
 
     #[test]

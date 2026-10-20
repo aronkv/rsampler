@@ -1029,6 +1029,16 @@ impl App {
     /// EDIT's DO IT.
     fn do_edit(&mut self, from: Section) {
         let (op, pad, to, ratio) = (self.edit_op, self.pad, self.edit_to, self.edit_ratio);
+        // A zone whose boundaries were moved together holds no audio to work on.
+        let empty = match op {
+            _ if !matches!(from, Section::Zone) => None,
+            edit::Op::Insert | edit::Op::LoopStEnd => None,
+            edit::Op::Slice => self.zones.windows(2).position(|w| w[0] == w[1]),
+            _ => (self.zones[self.zone] == self.zones[self.zone + 1]).then_some(self.zone),
+        };
+        if let Some(zone) = empty {
+            return self.say(format!("Zone {} is empty", zone + 1));
+        }
         // Keeps the pads the edit can change, for UNDO SEQ.
         let changes = match op {
             edit::Op::Slice => to..(to + self.zones.len() - 1).min(PADS),
