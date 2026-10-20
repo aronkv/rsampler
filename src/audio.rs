@@ -1223,6 +1223,10 @@ pub fn load_audio(path: &Path, rate: u32) -> Result<Frames, String> {
     // one; the padding decodes to silence, so trailing frames below -80 dB go.
     let adts = format.format_info().format == symphonia::core::formats::well_known::FORMAT_ID_ADTS;
     let aac = params.codec == symphonia::core::codecs::audio::well_known::CODEC_ID_AAC;
+    let adpcm = {
+        use symphonia::core::codecs::audio::well_known::*;
+        [CODEC_ID_ADPCM_MS, CODEC_ID_ADPCM_IMA_WAV].contains(&params.codec)
+    };
     let mut decoder = if opus {
         opus_decoder(params.extra_data.as_deref())?
     } else {
@@ -1304,6 +1308,9 @@ pub fn load_audio(path: &Path, rate: u32) -> Result<Frames, String> {
         let end = frames.iter().rposition(|f| f[0].abs().max(f[1].abs()) > 1e-4).map_or(0, |i| i + 1);
         frames.truncate(end);
     }
+    if let Some(n) = wav_fact(path).filter(|_| adpcm) {
+        frames.truncate(n);
+    }
     if frames.is_empty() || from == 0 {
         return Err("No audio in this file".to_owned());
     }
@@ -1379,47 +1386,55 @@ fn rf64_as_riff(path: &Path) -> Option<Vec<u8>> {
     None
 }
 
+/// The start (up to 60 bytes) of each of a WAV file's chunks named in `ids`, in file order.
+fn wav_chunks(path: &Path, ids: &[&[u8; 4]]) -> Vec<([u8; 4], Vec<u8>)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut found = Vec::new();
+    let Ok(file) = std::fs::File::open(path) else { return found };
+    let mut f = std::io::BufReader::new(file);
+    let mut head = [0; 12];
+    if f.read_exact(&mut head).is_err() || &head[..4] != b"RIFF" || &head[8..] != b"WAVE" {
+        return found;
+    }
+    let mut chunk = [0; 8];
+    while f.read_exact(&mut chunk).is_ok() {
+        let id: [u8; 4] = chunk[..4].try_into().unwrap();
+        let size = u32::from_le_bytes(chunk[4..].try_into().unwrap()) as u64;
+        let mut used = 0;
+        if ids.contains(&&id) {
+            let mut b = vec![0; size.min(60) as usize];
+            if f.read_exact(&mut b).is_err() {
+                break;
+            }
+            used = b.len() as u64;
+            found.push((id, b));
+        }
+        // Chunks are padded to an even length.
+        if f.seek(SeekFrom::Current((size + size % 2 - used) as i64)).is_err() {
+            break;
+        }
+    }
+    found
+}
+
 /// The first loop saved in a WAV file's `smpl` chunk, as other samplers write it: its first and
 /// last frame, and the file's sample rate.
 pub fn wav_loop(path: &Path) -> Option<(u64, u64, u32)> {
-    use std::io::{Read, Seek, SeekFrom};
-    let mut f = std::io::BufReader::new(std::fs::File::open(path).ok()?);
-    let mut head = [0; 12];
-    f.read_exact(&mut head).ok()?;
-    (&head[..4] == b"RIFF" && &head[8..] == b"WAVE").then_some(())?;
-    let (mut rate, mut found) = (None, None);
-    let mut chunk = [0; 8];
-    while f.read_exact(&mut chunk).is_ok() {
-        let size = u32::from_le_bytes(chunk[4..].try_into().ok()?) as u64;
-        let mut read = |n: usize| -> Option<Vec<u8>> {
-            let mut b = vec![0; n];
-            f.read_exact(&mut b).ok()?;
-            Some(b)
-        };
-        let used = match &chunk[..4] {
-            b"fmt " if size >= 8 => {
-                rate = Some(u32::from_le_bytes(read(8)?[4..8].try_into().ok()?));
-                8
-            }
-            // 36 bytes of header, then loops of 24: cue id, type, start, end, fraction, play count.
-            b"smpl" if size >= 60 => {
-                let b = read(60)?;
-                let loops = u32::from_le_bytes(b[28..32].try_into().ok()?);
-                let at = |i: usize| u32::from_le_bytes(b[i..i + 4].try_into().unwrap()) as u64;
-                if loops > 0 && at(48) >= at(44) {
-                    found = Some((at(44), at(48)));
-                }
-                60
-            }
-            _ => 0,
-        };
-        if let (Some(rate), Some((start, end))) = (rate, found) {
-            return Some((start, end, rate));
-        }
-        // Chunks are padded to an even length.
-        f.seek(SeekFrom::Current((size + size % 2 - used) as i64)).ok()?;
-    }
-    None
+    let chunks = wav_chunks(path, &[b"fmt ", b"smpl"]);
+    let get = |id: &[u8; 4]| chunks.iter().find(|(i, _)| i == id).map(|(_, b)| b);
+    let u32_at = |b: &[u8], i: usize| Some(u32::from_le_bytes(b.get(i..i + 4)?.try_into().ok()?) as u64);
+    let rate = u32_at(get(b"fmt ")?, 4)? as u32;
+    // 36 bytes of header, then loops of 24: cue id, type, start, end, fraction, play count.
+    let smpl = get(b"smpl")?;
+    let (loops, start, end) = (u32_at(smpl, 28)?, u32_at(smpl, 44)?, u32_at(smpl, 48)?);
+    (loops > 0 && end >= start).then_some((start, end, rate))
+}
+
+/// The length a compressed WAV file (ADPCM) gives in its `fact` chunk; its last block is padded.
+fn wav_fact(path: &Path) -> Option<usize> {
+    let chunks = wav_chunks(path, &[b"fact"]);
+    let b = &chunks.first()?.1;
+    Some(u32::from_le_bytes(b.get(..4)?.try_into().ok()?) as usize)
 }
 
 /// Loads a WAV file as stereo frames resampled to `rate`.
