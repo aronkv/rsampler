@@ -1178,19 +1178,15 @@ pub const AUDIO_EXTENSIONS: [&str; 12] =
 /// Loads a sound file as stereo frames resampled to `rate`: WAV, MP3, FLAC, M4A/AAC/ALAC,
 /// Ogg Vorbis or AIFF. Mono becomes both channels; more than two channels keep the first two.
 pub fn load_audio(path: &Path, rate: u32) -> Result<Frames, String> {
-    // ponytail: decodes the whole file into memory; 20 minutes at 48 kHz is about 460 MB of frames,
-    // so longer files are refused rather than streamed.
-    const MAX_SECONDS: usize = 20 * 60;
-    // Most WAV files are read directly; those it cannot read (64-bit float, RF64, unusual chunks,
-    // a cut-off end) go through the decoder below like the other formats.
-    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav"))
-        && let Ok(reader) = hound::WavReader::open(path)
-    {
-        if reader.duration() as usize > MAX_SECONDS * reader.spec().sample_rate as usize {
-            return Err("Longer than 20 minutes".to_owned());
-        }
-        if let Ok(frames) = load_wav(path, rate) {
-            return Ok(frames);
+    // Most WAV files are read directly; those it cannot read (64-bit float, A-law, ADPCM, unusual
+    // chunks, a cut-off end) go through the decoder below like the other formats.
+    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")) {
+        let read = match rf64_as_riff(path) {
+            Some(bytes) => hound::WavReader::new(std::io::Cursor::new(bytes)).ok().and_then(|r| read_wav(r, rate)),
+            None => hound::WavReader::open(path).ok().and_then(|r| read_wav(r, rate)),
+        };
+        if let Some(result) = read {
+            return result;
         }
     }
     use symphonia::core::codecs::audio::AudioDecoderOptions;
@@ -1319,9 +1315,58 @@ fn opus_decoder(head: Option<&[u8]>) -> Result<Decoder, String> {
     Ok(Decoder::OpusSurround(Box::new(decoder), channels, right))
 }
 
+// ponytail: decodes the whole file into memory; 20 minutes at 48 kHz is about 460 MB of frames,
+// so longer files are refused rather than streamed.
+const MAX_SECONDS: usize = 20 * 60;
+
+/// A WAV file's frames, refusing one over 20 minutes before reading it; `None` if the WAV reader
+/// cannot read it.
+fn read_wav<R: std::io::Read>(reader: hound::WavReader<R>, rate: u32) -> Option<Result<Frames, String>> {
+    if reader.duration() as usize > MAX_SECONDS * reader.spec().sample_rate as usize {
+        return Some(Err("Longer than 20 minutes".to_owned()));
+    }
+    wav_frames(reader, rate).ok().map(Ok)
+}
+
+/// An RF64 (or BW64) file, the WAV variant for files over 4 GB, as a plain WAV. Its sizes are in
+/// a `ds64` chunk with the usual ones set to 0xFFFFFFFF; a file that fits in a WAV only needs them
+/// put back. `None` for other files.
+fn rf64_as_riff(path: &Path) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut magic = [0; 4];
+    std::fs::File::open(path).ok()?.read_exact(&mut magic).ok()?;
+    if magic != *b"RF64" && magic != *b"BW64" {
+        return None;
+    }
+    let mut b = std::fs::read(path).ok()?;
+    let u32_at = |b: &[u8], i: usize| Some(u32::from_le_bytes(b.get(i..i + 4)?.try_into().ok()?));
+    // The ds64 chunk comes first: RIFF size, data size, sample count.
+    (b.get(12..16)? == b"ds64").then_some(())?;
+    let data_size = u64::from_le_bytes(b.get(28..36)?.try_into().ok()?);
+    let riff_size = u32::try_from(b.len() - 8).ok()?;
+    b[..4].copy_from_slice(b"RIFF");
+    b[4..8].copy_from_slice(&riff_size.to_le_bytes());
+    b[12..16].copy_from_slice(b"JUNK");
+    let mut at = 12;
+    while let Some(size) = u32_at(&b, at + 4) {
+        if b.get(at..at + 4)? == b"data" {
+            if size == u32::MAX {
+                b[at + 4..at + 8].copy_from_slice(&u32::try_from(data_size).ok()?.to_le_bytes());
+            }
+            return Some(b);
+        }
+        // Chunks are padded to an even length.
+        at += 8 + size as usize + size as usize % 2;
+    }
+    None
+}
+
 /// Loads a WAV file as stereo frames resampled to `rate`.
 pub fn load_wav(path: &Path, rate: u32) -> Result<Frames, hound::Error> {
-    let mut reader = hound::WavReader::open(path)?;
+    wav_frames(hound::WavReader::open(path)?, rate)
+}
+
+fn wav_frames<R: std::io::Read>(mut reader: hound::WavReader<R>, rate: u32) -> Result<Frames, hound::Error> {
     let spec = reader.spec();
     let raw: Vec<f32> = match spec.sample_format {
         hound::SampleFormat::Float => reader.samples::<f32>().collect::<Result<_, _>>()?,
@@ -1963,6 +2008,35 @@ mod tests {
         // Cut off halfway: the part that is there loads.
         std::fs::write(&path, &b[..b.len() - 400]).unwrap();
         assert_eq!(load_audio(&path, 48_000).unwrap().len(), 50);
+
+        // RF64: 16-bit mono, 100 frames of 0.5, its sizes in the ds64 chunk.
+        let data: Vec<u8> = (0..100).flat_map(|_| 16384i16.to_le_bytes()).collect();
+        let mut b = b"RF64".to_vec();
+        b.extend(u32::MAX.to_le_bytes());
+        b.extend(b"WAVEds64");
+        b.extend(28u32.to_le_bytes());
+        for v in [0u64, data.len() as u64, 100] {
+            b.extend(v.to_le_bytes());
+        }
+        b.extend(0u32.to_le_bytes());
+        b.extend(b"fmt ");
+        b.extend(16u32.to_le_bytes());
+        for v in [1u16, 1] {
+            b.extend(v.to_le_bytes());
+        }
+        b.extend(48_000u32.to_le_bytes());
+        b.extend((48_000u32 * 2).to_le_bytes());
+        for v in [2u16, 16] {
+            b.extend(v.to_le_bytes());
+        }
+        b.extend(b"data");
+        b.extend(u32::MAX.to_le_bytes());
+        b.extend(&data);
+        let path = dir.join("rf64.wav");
+        std::fs::write(&path, &b).unwrap();
+        let frames = load_audio(&path, 48_000).unwrap();
+        assert_eq!(frames.len(), 100);
+        assert!(frames.iter().all(|f| *f == [0.5, 0.5]));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
