@@ -1369,6 +1369,49 @@ fn rf64_as_riff(path: &Path) -> Option<Vec<u8>> {
     None
 }
 
+/// The first loop saved in a WAV file's `smpl` chunk, as other samplers write it: its first and
+/// last frame, and the file's sample rate.
+pub fn wav_loop(path: &Path) -> Option<(u64, u64, u32)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::io::BufReader::new(std::fs::File::open(path).ok()?);
+    let mut head = [0; 12];
+    f.read_exact(&mut head).ok()?;
+    (&head[..4] == b"RIFF" && &head[8..] == b"WAVE").then_some(())?;
+    let (mut rate, mut found) = (None, None);
+    let mut chunk = [0; 8];
+    while f.read_exact(&mut chunk).is_ok() {
+        let size = u32::from_le_bytes(chunk[4..].try_into().ok()?) as u64;
+        let mut read = |n: usize| -> Option<Vec<u8>> {
+            let mut b = vec![0; n];
+            f.read_exact(&mut b).ok()?;
+            Some(b)
+        };
+        let used = match &chunk[..4] {
+            b"fmt " if size >= 8 => {
+                rate = Some(u32::from_le_bytes(read(8)?[4..8].try_into().ok()?));
+                8
+            }
+            // 36 bytes of header, then loops of 24: cue id, type, start, end, fraction, play count.
+            b"smpl" if size >= 60 => {
+                let b = read(60)?;
+                let loops = u32::from_le_bytes(b[28..32].try_into().ok()?);
+                let at = |i: usize| u32::from_le_bytes(b[i..i + 4].try_into().unwrap()) as u64;
+                if loops > 0 && at(48) >= at(44) {
+                    found = Some((at(44), at(48)));
+                }
+                60
+            }
+            _ => 0,
+        };
+        if let (Some(rate), Some((start, end))) = (rate, found) {
+            return Some((start, end, rate));
+        }
+        // Chunks are padded to an even length.
+        f.seek(SeekFrom::Current((size + size % 2 - used) as i64)).ok()?;
+    }
+    None
+}
+
 /// Loads a WAV file as stereo frames resampled to `rate`.
 pub fn load_wav(path: &Path, rate: u32) -> Result<Frames, hound::Error> {
     wav_frames(hound::WavReader::open(path)?, rate)
@@ -2045,6 +2088,42 @@ mod tests {
         let frames = load_audio(&path, 48_000).unwrap();
         assert_eq!(frames.len(), 100);
         assert!(frames.iter().all(|f| *f == [0.5, 0.5]));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn wav_loop_points_are_read() {
+        let dir = std::env::temp_dir().join(format!("rsampler-smpl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("loop.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 44_100,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut w = hound::WavWriter::create(&path, spec).unwrap();
+        for _ in 0..1000 {
+            w.write_sample(0i16).unwrap();
+        }
+        w.finalize().unwrap();
+        assert_eq!(wav_loop(&path), None);
+        // A smpl chunk after the data, with one loop over frames 100 to 899.
+        let mut smpl = vec![0u8; 28];
+        smpl.extend(1u32.to_le_bytes());
+        smpl.extend([0; 4]);
+        for v in [0u32, 0, 100, 899, 0, 0] {
+            smpl.extend(v.to_le_bytes());
+        }
+        let mut b = std::fs::read(&path).unwrap();
+        b.extend(b"smpl");
+        b.extend((smpl.len() as u32).to_le_bytes());
+        b.extend(&smpl);
+        let riff = (b.len() - 8) as u32;
+        b[4..8].copy_from_slice(&riff.to_le_bytes());
+        std::fs::write(&path, &b).unwrap();
+        assert_eq!(wav_loop(&path), Some((100, 899, 44_100)));
+        assert_eq!(load_audio(&path, 44_100).unwrap().len(), 1000);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

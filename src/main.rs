@@ -1203,7 +1203,14 @@ impl App {
         } else {
             audio::load_audio(path, rate).map(|frames| {
                 let name = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-                (Sound::new(name, frames), 0)
+                let mut sound = Sound::new(name, frames);
+                // A loop saved in a WAV file carries over, playing up to its end.
+                if let Some((start, end, from)) = audio::wav_loop(path).filter(|_| !sound.frames.is_empty()) {
+                    let at = |v: u64| (v * rate as u64 / from.max(1) as u64) as usize;
+                    sound.end = at(end + 1).clamp(1, sound.frames.len());
+                    (sound.loop_to, sound.looping) = (at(start).min(sound.end - 1), true);
+                }
+                (sound, 0)
             })
         }
     }
