@@ -2280,7 +2280,7 @@ impl App {
             let base = if row.inverted { LCD_BG } else { LCD_INK };
             let galleys = |segs: &[lcd::Seg]| -> Vec<_> {
                 segs.iter()
-                    .map(|seg| (seg.field, painter.layout_no_wrap(seg.text.clone(), font.clone(), base)))
+                    .map(|seg| (seg.field, painter.layout_no_wrap(lcd_text(&seg.text), font.clone(), base)))
                     .collect()
             };
             let left = galleys(&row.left);
@@ -2290,7 +2290,8 @@ impl App {
             let mut right_x = p.pos(LCD_X + LCD_W - 3.0, 0.0).x - right_w;
             for (segs, x) in [(left, &mut x), (right, &mut right_x)] {
                 for (field, galley) in segs {
-                    let rect = Rect::from_min_size(egui::pos2(*x, p.pos(0.0, y).y), galley.size());
+                    // On whole pixels, so the accents of capitals stay sharp in a small window.
+                    let rect = Rect::from_min_size(egui::pos2(*x, p.pos(0.0, y).y).round(), galley.size());
                     if field.is_some() && field == focus {
                         painter.rect_filled(rect.expand(0.5 * s), 0.0, LCD_INK);
                         painter.text(rect.min, Align2::LEFT_TOP, galley.text(), font.clone(), LCD_BG);
@@ -2730,6 +2731,12 @@ fn scroll_points(ui: &Ui, scale: f32) -> f32 {
             })
             .sum()
     })
+}
+
+/// Text as the LCD shows it: emoji, which would be drawn in their own colours, become `?` like
+/// any character a real LCD lacks.
+fn lcd_text(text: &str) -> String {
+    text.chars().map(|c| if (c as u32) >= 0x1F000 { '?' } else { c }).collect()
 }
 
 /// How far one DATA wheel step moves a point in a sound: 1/500 of it, or a single frame with Shift.
