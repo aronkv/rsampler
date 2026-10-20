@@ -2085,6 +2085,7 @@ impl App {
         if self.editing_name {
             return self.type_name(&events);
         }
+        let browsing = matches!(self.screen, Screen::Load(_) | Screen::Save(_));
         let mut actions = Vec::new();
         for e in events {
             let egui::Event::Key { key, physical_key, pressed, repeat, modifiers } = e else { continue };
@@ -2141,6 +2142,11 @@ impl App {
                 Key::F6 => Action::Soft(5),
                 Key::Comma => Action::Step(-1),
                 Key::Period => Action::Step(1),
+                // In a file list these page through it instead of moving the playhead.
+                Key::PageUp if browsing => Action::Cursor(0, -10),
+                Key::PageDown if browsing => Action::Cursor(0, 10),
+                Key::Home if browsing => Action::Cursor(0, i32::MIN),
+                Key::End if browsing => Action::Cursor(0, i32::MAX),
                 Key::PageUp => Action::Bar(-1),
                 Key::PageDown => Action::Bar(1),
                 Key::Home => Action::Start,
@@ -2347,7 +2353,9 @@ impl App {
         let resp = ui.interact(screen, ui.scope_id().with("lcd"), Sense::hover());
         if resp.hovered() {
             let scroll = scroll_points(ui, s) / s;
-            self.turn(scroll);
+            // Over a file list, scrolling down moves down the list, the opposite of a value.
+            let browsing = matches!(self.screen, Screen::Load(_) | Screen::Save(_));
+            self.turn(if browsing { -scroll } else { scroll });
         }
     }
 
