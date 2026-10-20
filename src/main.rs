@@ -1039,6 +1039,23 @@ impl App {
         if let Some(zone) = empty {
             return self.say(format!("Zone {} is empty", zone + 1));
         }
+        // Refused edits leave UNDO SEQ with the last edit that did happen.
+        let count = if op == edit::Op::Slice { self.zones.len() - 1 } else { 1 };
+        let refused = self.with(|s| {
+            let pads = s.pads_mut();
+            if pads[pad].sound.is_none() {
+                Some("No sound on this pad")
+            } else if op == edit::Op::Insert && pads[to].sound.is_none() {
+                Some("That pad has no sound")
+            } else if op.makes_sounds() && to + count > PADS {
+                Some("Not enough pads after To pad")
+            } else {
+                None
+            }
+        });
+        if let Some(msg) = refused {
+            return self.say(msg);
+        }
         // Keeps the pads the edit can change, for UNDO SEQ.
         let changes = match op {
             edit::Op::Slice => to..(to + self.zones.len() - 1).min(PADS),
