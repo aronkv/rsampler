@@ -62,8 +62,6 @@ const KEYPAD: [(&str, &str); 10] = [
     ("3", "LOAD"),
     ("0", ""),
 ];
-/// Velocity for pads hit from the keyboard, which has no pressure.
-const KEY_VELOCITY: u8 = 101;
 /// DATA wheel travel (design units of drag or scroll) per step.
 const WHEEL_STEP: f32 = 12.0;
 const MESSAGE_TIME: Duration = Duration::from_secs(4);
@@ -1181,12 +1179,15 @@ impl App {
             Ok((sound, _)) if sound.frames.is_empty() => self.say("Empty file"),
             Ok((sound, tune)) => {
                 self.with(|s| {
+                    // Played once from St to End like PLAY X: a pad hit would hold a looping
+                    // sound until the pad was hit again.
+                    let range = sound.start..sound.end;
                     s.pads_mut()[pad].sound = Some(sound);
                     // An MPC sound's own tuning carries over to the pad.
                     if is_snd {
                         s.pads_mut()[pad].tune = tune;
                     }
-                    s.hits.push(Hit::Press { pad: pad as u8, velocity: KEY_VELOCITY, var: None });
+                    s.hits.push(Hit::Audition { pad: pad as u8, range });
                 });
                 self.say("Loaded");
             }
@@ -1895,8 +1896,9 @@ impl App {
         let rate = self.with(|s| s.rate);
         let frames: program::Frames = audio::resample(frames, from, rate).into();
         self.with(|s| {
+            let range = 0..frames.len();
             s.pads_mut()[pad].sound = Some(Sound::new(name.clone(), frames));
-            s.hits.push(Hit::Press { pad: pad as u8, velocity: KEY_VELOCITY, var: None });
+            s.hits.push(Hit::Audition { pad: pad as u8, range });
         });
         self.say(format!("Kept {name} on {}", program::pad_name(pad)));
     }
