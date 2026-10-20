@@ -160,9 +160,12 @@ pub fn stretch(x: &[[f32; 2]], ratio: f64, rate: u32) -> Vec<[f32; 2]> {
         };
         for i in 0..win {
             let Some(f) = x.get(pos + i) else { break };
+            // The first window has nothing before it to overlap, so it starts at full level
+            // instead of fading in, which would soften a drum's attack.
+            let w = if k == 0 && i < hop { 1.0 } else { hann[i] };
             let o = &mut out[k * hop + i];
-            o[0] += f[0] * hann[i];
-            o[1] += f[1] * hann[i];
+            o[0] += f[0] * w;
+            o[1] += f[1] * w;
         }
         natural = pos + hop;
     }
@@ -266,6 +269,8 @@ mod tests {
             // No dropouts or overshoot from the overlapping windows.
             let peak = mid.iter().fold(0.0f32, |m, f| m.max(f[0].abs()));
             assert!(peak > 0.45 && peak < 0.55, "ratio {ratio}: peak {peak}");
+            // The start is kept as it is, attack included.
+            assert_eq!(out[..100], tone[..100]);
         }
     }
 
