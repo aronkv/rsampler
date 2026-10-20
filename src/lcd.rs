@@ -72,6 +72,11 @@ fn unaccented(c: char) -> char {
     }
 }
 
+/// A point in a sound as the MPC shows it: its frame number, so a single-frame step shows.
+fn frames(n: usize) -> String {
+    format!("{n:07}")
+}
+
 /// Files and folders Windows marks hidden, such as the old `My Documents` links in a user folder.
 #[cfg(windows)]
 fn hidden(path: &Path) -> bool {
@@ -1089,7 +1094,7 @@ pub fn rows(v: &View) -> Vec<Row> {
                     vec![t(format!("Len:{}", secs(len)))],
                 ),
                 row(
-                    vec![t("St:"), f(Field::Start, secs(st)), t("  End:"), f(Field::End, secs(end))],
+                    vec![t("St:"), f(Field::Start, frames(st)), t("  End:"), f(Field::End, frames(end))],
                     vec![t(if v.message.is_empty() {
                         format!("Play:{}", secs(end.saturating_sub(st)))
                     } else {
@@ -1099,7 +1104,6 @@ pub fn rows(v: &View) -> Vec<Row> {
             ]
         }
         Screen::Loop => {
-            let secs = |frames: usize| format!("{:.3}s", frames as f32 / s.rate as f32);
             let (to, end, looping) =
                 s.pads()[v.pad].sound.as_ref().map_or((0, 0, false), |snd| (snd.loop_to, snd.end, snd.looping));
             vec![
@@ -1110,18 +1114,17 @@ pub fn rows(v: &View) -> Vec<Row> {
                 row(
                     vec![
                         t("To:"),
-                        f(Field::LoopTo, secs(to)),
+                        f(Field::LoopTo, frames(to)),
                         t(" Lngth:"),
-                        f(Field::LoopLen, secs(end.saturating_sub(to))),
+                        f(Field::LoopLen, frames(end.saturating_sub(to))),
                         t(" End:"),
-                        f(Field::End, secs(end)),
+                        f(Field::End, frames(end)),
                     ],
                     vec![t(v.message)],
                 ),
             ]
         }
         Screen::Zone => {
-            let secs = |frames: usize| format!("{:.3}s", frames as f32 / s.rate as f32);
             let (zone, bounds) = v.zone;
             let count = bounds.len().saturating_sub(1);
             let (st, end) = (bounds.get(zone).copied().unwrap_or(0), bounds.get(zone + 1).copied().unwrap_or(0));
@@ -1135,9 +1138,9 @@ pub fn rows(v: &View) -> Vec<Row> {
                         t("Zone:"),
                         f(Field::Zone, format!("{:2}", zone + 1)),
                         t("  St:"),
-                        f(Field::ZoneStart, secs(st)),
+                        f(Field::ZoneStart, frames(st)),
                         t("  End:"),
-                        f(Field::ZoneEnd, secs(end)),
+                        f(Field::ZoneEnd, frames(end)),
                     ],
                     vec![t(v.message)],
                 ),
