@@ -7,18 +7,24 @@
    `~/Music`.
 3. Move with the arrow keys or the **DATA** wheel.
 4. <kbd>Enter</kbd>, **→**, **ENTER** or **F6** opens a folder, or loads the sound into the pad and
-   plays it.
+   plays it. The pad keeps its settings (tuning, envelope, mixer); only the sound changes.
 5. <kbd>Backspace</kbd>, **←** or **F1** goes up a folder.
 
 **PLAY** (F5) listens to the selected sound file without loading it; **STOP** or leaving the screen
 stops it.
 
-These formats load, mono or stereo, up to 20 minutes long:
+The browser lists folders and the files rsampler can load; hidden files and folders (names starting
+with a dot) are left out. These formats load, up to 20 minutes long:
 
-- WAV of any bit depth and sample rate
-- MP3, FLAC, M4A (AAC or Apple Lossless), Ogg Vorbis, AIFF
+- WAV: 8, 16, 24 or 32-bit, 32 or 64-bit float, any sample rate
+- MP3, FLAC, M4A or MP4 (AAC or Apple Lossless), AAC, Ogg Vorbis, AIFF and AIFC
 - The MPC2000XL's own `.SND` sounds, with their trim points, loop and tuning, so old MPC sound
   libraries can be used directly
+
+Mono files play on both channels; files with more than two channels keep the first two. A file
+that is cut off part-way loads up to where it ends. Ogg Opus and RF64 files are not supported, and
+loop points saved inside WAV files are not read: set them on the [LOOP](#trim-loop-and-zone)
+screen.
 
 MPC programs and sequences load from the same screen; see [Files](files.md).
 
@@ -53,12 +59,13 @@ all three, **PLAY X** (F6) plays the highlighted part once, as it is, and **EDIT
   (or, in a sequence, for the length of the note), then fades out over its decay. `Lngth` moves
   `To` so the loop gets longer or shorter. A looping sound always plays as NOTE OFF, as on the
   MPC. **RESET** (F4) turns the loop off.
-- **ZONE** chops the sound: `Zones` splits it into 1–16 equal zones, back to back. `Zone` picks
-  one, and its `St` and `End` move the boundaries it shares with its neighbours, so no part is lost
-  or played twice. **RESET** (F4) splits it evenly again.
+- **ZONE** chops the sound: `Zones` splits the whole sound into 1–16 equal zones, back to back.
+  `Zone` picks one, and its `St` and `End` move the boundaries it shares with its neighbours, so no
+  part is lost or played twice. A zone whose `St` and `End` meet is empty, and EDIT refuses to work
+  on it. **RESET** (F4) splits it evenly again.
 
 Every point moves by 1/500 of the sound per DATA wheel step, or by single frames with
-<kbd>Shift</kbd>.
+<kbd>Shift</kbd>. `St` always stays at least one frame before `End`.
 
 ## EDIT
 
@@ -73,15 +80,16 @@ EDIT works on St–End from TRIM, on the loop from LOOP, and on the selected zon
 | DELETE SECTION | Cuts the section out |
 | SILENCE SECTION | Makes the section silent |
 | REVERSE SECTION | Plays the section backwards |
-| TIME STRETCH | Puts the section on `To pad` made longer or shorter at the same pitch: `Ratio` is the new length, 50–200 % (1 % a step, 0.1 % with Shift) |
-| RESAMPLE | Puts the section on `To pad` as if sampled again at `New fs` (4000–48000 Hz) and 8, 12 or 16 `Bits`, without smoothing: the gritty sound of old samplers |
+| TIME STRETCH | Puts the section on `To pad` made longer or shorter at the same pitch: `Ratio` is the new length, 50–200 % (1 % a step, 0.1 % with Shift). Sections shorter than 80 ms are copied unchanged |
+| RESAMPLE | Puts the section on `To pad` as if sampled again at `New fs` (4000–48000 Hz, 1000 Hz a step, 50 Hz with Shift) and 8, 12 or 16 `Bits`, without smoothing: the gritty sound of old samplers |
 | NORMALIZE SECTION | Raises the section until its loudest point is at full level |
 | SLICE SOUND (ZONE) | Puts every zone on its own pad, from `To pad` on |
 
 **DO IT** (F5) applies it, **CANCEL** (F4) goes back. New sounds are named after the original
-(`KICK-1`, `KICK-2`, …) and their pads start from the default settings. **UNDO SEQ**
+(`KICK-1`, `KICK-2`, … for sections and slices, `KICK-T` stretched, `KICK-R` resampled) and their
+pads start from the default settings, replacing what was there. **UNDO SEQ**
 (<kbd>Ctrl</kbd>+<kbd>Z</kbd>) on these screens takes back the last edit, and pressed again redoes
-it.
+it; there is one step of undo. Edited sounds are saved with the [project](files.md#saving-and-loading-projects).
 
 !!! quote "On the MPC"
 
