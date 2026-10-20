@@ -16,7 +16,7 @@ pub struct Browser {
 
 impl Browser {
     pub fn open(dir: PathBuf, wavs: bool) -> Self {
-        let visible = |p: &Path| !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'));
+        let visible = |p: &Path| !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) && !hidden(p);
         let mut entries: Vec<PathBuf> = fs::read_dir(&dir)
             .into_iter()
             .flatten()
@@ -27,6 +27,19 @@ impl Browser {
         entries.sort_by_key(|p| (!p.is_dir(), p.file_name().map(|n| n.to_string_lossy().to_lowercase())));
         Self { dir, entries, cursor: 0 }
     }
+}
+
+/// Files and folders Windows marks hidden, such as the old `My Documents` links in a user folder.
+#[cfg(windows)]
+fn hidden(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 2;
+    path.symlink_metadata().is_ok_and(|m| m.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0)
+}
+
+#[cfg(not(windows))]
+fn hidden(_: &Path) -> bool {
+    false
 }
 
 /// Sound and music files, the MPC2000XL's own .SND sounds, .PGM and .APS programs and .ALL
