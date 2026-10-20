@@ -7,7 +7,7 @@ use crate::audio::{RecMode, Shared};
 use crate::program::{Generation, pad_name};
 use crate::seq::{EventOp, TIMING, ValueMode};
 
-/// LOAD and SAVE screens: a directory listing of subfolders, and WAV files when loading.
+/// LOAD and SAVE screens: a directory listing of subfolders, and sound files when loading.
 pub struct Browser {
     pub dir: PathBuf,
     pub entries: Vec<PathBuf>,
@@ -1218,10 +1218,17 @@ pub fn rows(v: &View) -> Vec<Row> {
                 } else {
                     (name.into_owned(), "")
                 };
+                // Long names are cut to fit the LCD's 63 columns, leaving room for the kind.
+                let room = 61 - kind.len();
+                let name = if name.chars().count() > room {
+                    format!("{}..", name.chars().take(room - 2).collect::<String>())
+                } else {
+                    name
+                };
                 rows.push(Row { left: vec![t(format!(" {name}"))], right: vec![t(kind)], inverted: i == b.cursor });
             }
             if b.entries.is_empty() {
-                rows.push(row(vec![t(if saving { " (no folders)" } else { " (no folders or .wav files)" })], vec![]));
+                rows.push(row(vec![t(if saving { " (no folders)" } else { " (no folders or sound files)" })], vec![]));
             }
             rows.resize_with(4, Row::default);
             if saving {
