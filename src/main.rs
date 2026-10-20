@@ -174,8 +174,9 @@ enum Action {
     Undo,
     Cursor(i32, i32),
     Data(i32),
-    /// A DATA step that ignores Shift: the `+` key, which needs Shift on most layouts.
-    DataCoarse(i32),
+    /// A DATA step whose fineness does not follow Shift: the `+` key needs Shift to be typed on
+    /// most layouts, and `_` is Shift with the `-` key.
+    DataStep(i32, bool),
     Enter,
     Main,
     Back,
@@ -2050,8 +2051,8 @@ impl App {
             Action::Undo => self.undo(),
             Action::Cursor(dx, dy) => self.cursor(dx, dy),
             Action::Data(d) => self.data(d),
-            Action::DataCoarse(d) => {
-                let shift = std::mem::take(&mut self.shift);
+            Action::DataStep(d, fine) => {
+                let shift = std::mem::replace(&mut self.shift, fine);
                 self.data(d);
                 self.shift = shift;
             }
@@ -2088,6 +2089,12 @@ impl App {
         let browsing = matches!(self.screen, Screen::Load(_) | Screen::Save(_));
         let mut actions = Vec::new();
         for e in events {
+            // Shift with the - key types _ on most layouts, which has no key of its own here; it
+            // is a fine step down, as Shift is held.
+            if e == egui::Event::Text("_".to_owned()) {
+                actions.push(Action::DataStep(-1, true));
+                continue;
+            }
             let egui::Event::Key { key, physical_key, pressed, repeat, modifiers } = e else { continue };
             let command = modifiers.ctrl || modifiers.command || modifiers.alt;
             // Pads follow physical positions, so QWERTZ and AZERTY keyboards get the same grid.
@@ -2127,7 +2134,7 @@ impl App {
                 Key::ArrowDown => Action::Cursor(0, 1),
                 // Typing `+` takes Shift on most layouts (Shift+3 Hungarian, Shift+= US), and where
                 // it does not, Shift+`+` gives another character, so Shift is not fine mode here.
-                Key::Plus => Action::DataCoarse(1),
+                Key::Plus => Action::DataStep(1, false),
                 Key::Equals => Action::Data(1),
                 Key::Minus => Action::Data(-1),
                 Key::Enter if modifiers.ctrl => Action::OpenWindow,
