@@ -92,6 +92,10 @@ pub fn apply(snd: &mut Sound, op: Op, section: Range<usize>) {
             frames.drain(section.clone());
             (snd.start, snd.end) = (after_cut(snd.start, &section), after_cut(snd.end, &section));
             snd.loop_to = after_cut(snd.loop_to, &section);
+            // Deleting all of St–End would leave nothing to play: St–End becomes what is left.
+            if snd.start >= snd.end {
+                (snd.start, snd.end) = (0, frames.len());
+            }
         }
         Op::Silence => frames[section].fill([0.0; 2]),
         Op::Reverse => frames[section].reverse(),
@@ -234,6 +238,9 @@ mod tests {
         // Deleting everything is refused.
         apply(&mut s, Op::Delete, 0..7);
         assert_eq!(s.frames.len(), 7);
+        // Deleting St–End itself leaves the rest of the sound to play.
+        apply(&mut s, Op::Delete, 1..6);
+        assert_eq!((s.start, s.end, s.frames.len()), (0, 2, 2));
     }
 
     #[test]
