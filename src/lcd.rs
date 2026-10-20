@@ -24,8 +24,51 @@ impl Browser {
             .map(|e| e.path())
             .filter(|p| visible(p) && (p.is_dir() || (wavs && is_sound(p))))
             .collect();
-        entries.sort_by_key(|p| (!p.is_dir(), p.file_name().map(|n| n.to_string_lossy().to_lowercase())));
+        entries.sort_by_cached_key(|p| (!p.is_dir(), sort_key(&p.file_name().unwrap_or_default().to_string_lossy())));
         Self { dir, entries, cursor: 0 }
+    }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum Chunk {
+    Number(u64),
+    Text(String),
+}
+
+/// How the browser orders names: ignoring case and accents (é with e), and numbers by value, so
+/// KICK2 comes before KICK10.
+fn sort_key(name: &str) -> Vec<Chunk> {
+    let mut chunks: Vec<Chunk> = Vec::new();
+    for c in name.chars().flat_map(char::to_lowercase) {
+        let digit = c.is_ascii_digit();
+        match chunks.last_mut() {
+            Some(Chunk::Number(n)) if digit => *n = n.saturating_mul(10).saturating_add(c as u64 - '0' as u64),
+            Some(Chunk::Text(s)) if !digit => s.push(unaccented(c)),
+            _ if digit => chunks.push(Chunk::Number(c as u64 - '0' as u64)),
+            _ => chunks.push(Chunk::Text(unaccented(c).to_string())),
+        }
+    }
+    chunks
+}
+
+/// The letter a lowercase accented Latin letter is sorted with.
+fn unaccented(c: char) -> char {
+    match c {
+        'à'..='å' | 'ā' | 'ă' | 'ą' => 'a',
+        'ç' | 'ć' | 'č' => 'c',
+        'ď' => 'd',
+        'è'..='ë' | 'ē' | 'ė' | 'ę' | 'ě' => 'e',
+        'ì'..='ï' | 'ī' | 'į' => 'i',
+        'ł' | 'ľ' | 'ĺ' => 'l',
+        'ñ' | 'ń' | 'ň' => 'n',
+        'ò'..='ö' | 'ø' | 'ō' | 'ő' => 'o',
+        'ŕ' | 'ř' => 'r',
+        'ś' | 'š' | 'ş' => 's',
+        'ť' | 'ţ' => 't',
+        'ù'..='ü' | 'ū' | 'ů' | 'ű' | 'ų' => 'u',
+        'ý' | 'ÿ' => 'y',
+        'ź' | 'ż' | 'ž' => 'z',
+        _ => c,
     }
 }
 
@@ -1273,6 +1316,13 @@ pub fn fields(rows: &[Row]) -> Vec<(usize, Field)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_sort_by_letter_and_number() {
+        let mut names = ["kick10.wav", "Zene", "élő", "kick2.wav", "Ének", "abc", "KICK1.wav"];
+        names.sort_by_cached_key(|n| sort_key(n));
+        assert_eq!(names, ["abc", "élő", "Ének", "KICK1.wav", "kick2.wav", "kick10.wav", "Zene"]);
+    }
 
     #[test]
     fn pan_labels() {
