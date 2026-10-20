@@ -2169,6 +2169,13 @@ impl eframe::App for App {
             self.message.clear();
         }
         self.keyboard(ui);
+        // The keyboard is the MPC's own keys: Tab is PAD BANK and Enter is ENTER, so no panel
+        // button may keep egui's keyboard focus, or Enter or Space would also press it.
+        ui.ctx().memory_mut(|m| {
+            if let Some(id) = m.focused() {
+                m.surrender_focus(id);
+            }
+        });
         self.sync_zones();
         self.guard_close(ui);
         // Picks up MIDI controllers plugged in while running.
