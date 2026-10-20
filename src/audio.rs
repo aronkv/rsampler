@@ -1209,6 +1209,10 @@ pub fn load_audio(path: &Path, rate: u32) -> Result<Frames, String> {
     let track = format.default_track(TrackType::Audio).ok_or("No audio in this file")?;
     let params = track.codec_params.as_ref().and_then(|p| p.audio()).ok_or("No audio in this file")?;
     let opus = params.codec == symphonia::core::codecs::audio::well_known::CODEC_ID_OPUS;
+    // A raw .aac stream counts whole frames, so it does not say how much padding fills its last
+    // one; the padding decodes to silence, so trailing frames below -80 dB go.
+    let adts = format.format_info().format == symphonia::core::formats::well_known::FORMAT_ID_ADTS;
+    let aac = params.codec == symphonia::core::codecs::audio::well_known::CODEC_ID_AAC;
     let mut decoder = if opus {
         opus_decoder(params.extra_data.as_deref())?
     } else {
@@ -1222,7 +1226,7 @@ pub fn load_audio(path: &Path, rate: u32) -> Result<Frames, String> {
     // only signalled in the edit list), which would make a drum hit start late. Other formats
     // trim theirs while decoding.
     // ponytail: assumes the usual 1024; files with another delay (iTunes uses 2112) keep the rest.
-    let aac_delay = params.codec == symphonia::core::codecs::audio::well_known::CODEC_ID_AAC && track.delay.is_none();
+    let aac_delay = aac && track.delay.is_none();
     // Opus leaves its pre-skip, given in the file, to the decoder.
     let delay = if aac_delay {
         Some(1024)
@@ -1285,6 +1289,10 @@ pub fn load_audio(path: &Path, rate: u32) -> Result<Frames, String> {
     frames.drain(..skip.min(frames.len()));
     if let Some(n) = length {
         frames.truncate(n as usize);
+    }
+    if adts {
+        let end = frames.iter().rposition(|f| f[0].abs().max(f[1].abs()) > 1e-4).map_or(0, |i| i + 1);
+        frames.truncate(end);
     }
     if frames.is_empty() || from == 0 {
         return Err("No audio in this file".to_owned());
