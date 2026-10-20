@@ -174,6 +174,8 @@ enum Action {
     Undo,
     Cursor(i32, i32),
     Data(i32),
+    /// A DATA step that ignores Shift: the `+` key, which needs Shift on most layouts.
+    DataCoarse(i32),
     Enter,
     Main,
     Back,
@@ -2048,6 +2050,11 @@ impl App {
             Action::Undo => self.undo(),
             Action::Cursor(dx, dy) => self.cursor(dx, dy),
             Action::Data(d) => self.data(d),
+            Action::DataCoarse(d) => {
+                let shift = std::mem::take(&mut self.shift);
+                self.data(d);
+                self.shift = shift;
+            }
             Action::Enter => self.enter(),
             Action::Main => self.set_screen(Screen::Main),
             Action::Back => self.parent_dir(),
@@ -2117,7 +2124,10 @@ impl App {
                 Key::ArrowRight => Action::Cursor(1, 0),
                 Key::ArrowUp => Action::Cursor(0, -1),
                 Key::ArrowDown => Action::Cursor(0, 1),
-                Key::Plus | Key::Equals => Action::Data(1),
+                // Typing `+` takes Shift on most layouts (Shift+3 Hungarian, Shift+= US), and where
+                // it does not, Shift+`+` gives another character, so Shift is not fine mode here.
+                Key::Plus => Action::DataCoarse(1),
+                Key::Equals => Action::Data(1),
                 Key::Minus => Action::Data(-1),
                 Key::Enter if modifiers.ctrl => Action::OpenWindow,
                 Key::Enter => Action::Enter,
