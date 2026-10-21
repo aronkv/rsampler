@@ -71,10 +71,6 @@ impl Panel {
         Rect::from_min_size(self.pos(x, y), vec2(w, h) * self.scale)
     }
 
-    pub fn mono(&self, size: f32) -> FontId {
-        FontId::monospace(size * self.scale)
-    }
-
     pub fn prop(&self, size: f32) -> FontId {
         FontId::proportional(size * self.scale)
     }
