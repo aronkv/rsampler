@@ -73,7 +73,7 @@ const LCD_W: f32 = 338.0;
 const ROW_H: f32 = 10.5;
 /// LCD text sits this far down in its row, and accents of capitals this far above their letter
 /// (the font's cap height less its x-height, where lowercase accents sit).
-const TEXT_DROP: f32 = 0.8;
+const TEXT_DROP: f32 = 1.8;
 const ACCENT_LIFT: f32 = 1.2;
 
 struct App {
@@ -2344,10 +2344,14 @@ impl App {
                     let advance = galley.size().x / text.chars().count().max(1) as f32;
                     for (n, c) in text.chars().enumerate() {
                         if let Some((_, accent)) = capital_accent(c) {
-                            let at = rect.min + vec2(n as f32 * advance, -ACCENT_LIFT * s);
-                            painter.text(at.round(), Align2::LEFT_TOP, accent, font.clone(), color);
+                            let left = rect.min.x + n as f32 * advance;
+                            if !two_marks(painter, egui::pos2(left + advance / 2.0, rect.min.y), accent, s, color) {
+                                let at = egui::pos2(left, rect.min.y - ACCENT_LIFT * s);
+                                painter.text(at.round(), Align2::LEFT_TOP, accent, font.clone(), color);
+                            }
                         }
                     }
+                    plain_zeros(painter, rect, &text, color);
                     if let Some(field) = field
                         && ui
                             .interact(rect, ui.scope_id().with(("field", i, rect.min.x as i32)), Sense::click())
@@ -2442,7 +2446,9 @@ impl App {
                 painter.rect_filled(label, 0.0, LCD_INK);
             }
             let color = if selected { LCD_BG } else { LCD_INK };
-            painter.text(label.center(), Align2::CENTER_CENTER, format!("{:02}", i + 1), p.mono(6.0), color);
+            let number = format!("{:02}", i + 1);
+            let rect = painter.text(label.center(), Align2::CENTER_CENTER, &number, p.mono(6.0), color);
+            plain_zeros(painter, rect, &number, color);
         }
     }
 
@@ -2808,6 +2814,65 @@ fn capital_accent(c: char) -> Option<(char, char)> {
         }
     }
     None
+}
+
+/// Draws a diaeresis or double acute over the capital whose text starts at `top`, centred on
+/// `x`; returns false for other accents. Drawn by hand: at LCD size the font blurs the two marks
+/// into one, and Ö would read as Ō, Ő as Ó.
+fn two_marks(
+    painter: &egui::Painter,
+    egui::Pos2 { x, y: top }: egui::Pos2,
+    accent: char,
+    s: f32,
+    color: Color32,
+) -> bool {
+    let ppp = painter.pixels_per_point();
+    let snap = |v: f32| (v * ppp).round() / ppp;
+    // The bottom of the marks: one dot-width above the capital, which starts 1.5 units down.
+    let bottom = snap(top + 0.75 * s);
+    let size = snap(0.9 * s).max(1.0 / ppp);
+    match accent {
+        '¨' => {
+            // A mesh, not a filled rectangle: no soft edge, which would fade a one-pixel dot away.
+            let mut dots = egui::Mesh::default();
+            for side in [-1.0, 1.0] {
+                let left = snap(x + side * 1.1 * s - size / 2.0);
+                dots.add_colored_rect(Rect::from_min_size(egui::pos2(left, bottom - size), vec2(size, size)), color);
+            }
+            painter.add(dots);
+        }
+        '˝' => {
+            for side in [-1.0, 1.0] {
+                let foot = x + side * 1.1 * s - 0.5 * s;
+                let stroke = Stroke::new(size, color);
+                painter.line_segment([egui::pos2(foot, bottom), egui::pos2(foot + 1.0 * s, bottom - 1.3 * s)], stroke);
+            }
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// Covers the dot inside each zero of `text`, drawn in `color` at `rect`: the font's zero has one,
+/// the LCD's is a plain oval.
+fn plain_zeros(painter: &egui::Painter, rect: Rect, text: &str, color: Color32) {
+    let advance = rect.width() / text.chars().count().max(1) as f32;
+    // Under 6 pixels a character the dot is lost in the outline, and covering it would cut that.
+    if advance * painter.pixels_per_point() < 6.0 {
+        return;
+    }
+    // Font units (Hack's advance is 1233 of them) to points; the baseline is 1901 below the top.
+    let unit = advance / 1233.0;
+    let baseline = rect.min.y + 1901.0 * unit;
+    let behind = if color == LCD_BG { LCD_INK } else { LCD_BG };
+    for (n, _) in text.chars().enumerate().filter(|(_, c)| *c == '0') {
+        let left = rect.min.x + n as f32 * advance;
+        let dot = Rect::from_min_max(
+            egui::pos2(left + 440.0 * unit, baseline - 1180.0 * unit),
+            egui::pos2(left + 793.0 * unit, baseline - 310.0 * unit),
+        );
+        painter.rect_filled(dot, 0.0, behind);
+    }
 }
 
 /// Text as the LCD shows it: emoji, which would be drawn in their own colours, become `?` like
