@@ -6,7 +6,6 @@ mod audio;
 mod edit;
 mod fx;
 mod lcd;
-mod lcdfont;
 mod midi;
 mod midifile;
 mod panel;
@@ -72,8 +71,6 @@ const LCD_X: f32 = 116.0;
 const LCD_Y: f32 = 56.0;
 const LCD_W: f32 = 338.0;
 const ROW_H: f32 = 10.5;
-/// Dot pitch of the LCD font: 14 rows of dots fill a row.
-const LCD_DOT: f32 = ROW_H / 14.0;
 
 struct App {
     engine: Engine,
@@ -2303,7 +2300,7 @@ impl App {
         let fields = lcd::fields(&rows);
         let focus = (!matches!(self.screen, Screen::Load(_) | Screen::Save(_)) && !fields.is_empty())
             .then(|| fields[self.focus.min(fields.len() - 1)].1);
-        let dot = LCD_DOT * s;
+        let font = p.mono(7.5);
         let mut clicked = None;
 
         for (i, row) in rows.iter().take(self.screen.text_rows()).enumerate() {
@@ -2312,31 +2309,26 @@ impl App {
                 painter.rect_filled(p.rect(LCD_X + 1.0, y, LCD_W - 2.0, ROW_H), 0.0, LCD_INK);
             }
             let base = if row.inverted { LCD_BG } else { LCD_INK };
-            let texts =
-                |segs: &[lcd::Seg]| -> Vec<_> { segs.iter().map(|seg| (seg.field, lcd_text(&seg.text))).collect() };
-            let left = texts(&row.left);
-            let right = texts(&row.right);
-            let right_w: f32 = right.iter().map(|(_, t)| lcdfont::width(t, dot)).sum();
+            let galleys = |segs: &[lcd::Seg]| -> Vec<_> {
+                segs.iter()
+                    .map(|seg| (seg.field, painter.layout_no_wrap(lcd_text(&seg.text), font.clone(), base)))
+                    .collect()
+            };
+            let left = galleys(&row.left);
+            let right = galleys(&row.right);
+            let right_w: f32 = right.iter().map(|(_, g)| g.size().x).sum();
             let mut x = p.pos(LCD_X + 3.0, 0.0).x;
             let mut right_x = p.pos(LCD_X + LCD_W - 3.0, 0.0).x - right_w;
             for (segs, x) in [(left, &mut x), (right, &mut right_x)] {
-                for (field, text) in segs {
-                    let rect = Rect::from_min_size(
-                        egui::pos2(*x, p.pos(0.0, y).y),
-                        vec2(lcdfont::width(&text, dot), 13.0 * dot),
-                    );
-                    let focused = field.is_some() && field == focus;
-                    if focused {
-                        painter.rect_filled(rect, 0.0, LCD_INK);
+                for (field, galley) in segs {
+                    // On whole pixels, so the accents of capitals stay sharp in a small window.
+                    let rect = Rect::from_min_size(egui::pos2(*x, p.pos(0.0, y).y).round(), galley.size());
+                    if field.is_some() && field == focus {
+                        painter.rect_filled(rect.expand(0.5 * s), 0.0, LCD_INK);
+                        painter.text(rect.min, Align2::LEFT_TOP, galley.text(), font.clone(), LCD_BG);
+                    } else {
+                        painter.galley(rect.min, galley.clone(), base);
                     }
-                    lcdfont::paint(
-                        painter,
-                        rect.min,
-                        Align2::LEFT_TOP,
-                        &text,
-                        dot,
-                        if focused { LCD_BG } else { base },
-                    );
                     if let Some(field) = field
                         && ui
                             .interact(rect, ui.scope_id().with(("field", i, rect.min.x as i32)), Sense::click())
@@ -2344,7 +2336,7 @@ impl App {
                     {
                         clicked = fields.iter().position(|(_, f)| *f == field);
                     }
-                    *x += rect.width();
+                    *x += galley.size().x;
                 }
             }
         }
@@ -2378,7 +2370,7 @@ impl App {
             let tab = p.rect(163.0 + i as f32 * 41.0, 133.0, 36.0, 9.5);
             if !label.is_empty() {
                 painter.rect_filled(tab, 0.0, LCD_INK);
-                lcdfont::paint(painter, tab.center(), Align2::CENTER_CENTER, label, LCD_DOT * s, LCD_BG);
+                painter.text(tab.center(), Align2::CENTER_CENTER, *label, p.mono(6.0), LCD_BG);
             }
             let legend = format!("F{}", i + 1);
             let at = p.pos(181.0 + i as f32 * 41.0, 163.0);
@@ -2431,14 +2423,7 @@ impl App {
                 painter.rect_filled(label, 0.0, LCD_INK);
             }
             let color = if selected { LCD_BG } else { LCD_INK };
-            lcdfont::paint(
-                painter,
-                label.center(),
-                Align2::CENTER_CENTER,
-                &format!("{:02}", i + 1),
-                LCD_DOT * s,
-                color,
-            );
+            painter.text(label.center(), Align2::CENTER_CENTER, format!("{:02}", i + 1), p.mono(6.0), color);
         }
     }
 
@@ -2451,14 +2436,7 @@ impl App {
         let pos = |db: f32| x0 + w * ((db + 60.0) / 60.0).clamp(0.0, 1.0);
         for (ch, level) in peak.iter().enumerate() {
             let y = LCD_Y + 3.0 * ROW_H + 2.0 + ch as f32 * 9.0;
-            lcdfont::paint(
-                painter,
-                p.pos(LCD_X + 3.0, y + 3.5),
-                Align2::LEFT_CENTER,
-                ["L", "R"][ch],
-                LCD_DOT * s,
-                LCD_INK,
-            );
+            painter.text(p.pos(LCD_X + 3.0, y + 3.5), Align2::LEFT_CENTER, ["L", "R"][ch], p.mono(7.0), LCD_INK);
             painter.rect_stroke(p.rect(x0, y, w, 7.0), 0.0, Stroke::new(0.7 * s, LCD_INK), StrokeKind::Inside);
             let x1 = pos(sample::db(*level));
             painter.rect_filled(p.rect(x0, y, x1 - x0, 7.0), 0.0, LCD_INK);
