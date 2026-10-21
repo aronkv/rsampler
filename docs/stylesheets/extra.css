@@ -87,7 +87,15 @@
   border-color: var(--md-typeset-a-color);
 }
 
-.md-typeset .md-button:not(.md-button--primary):hover {
+/* After a click, or when coming back from the link, the button keeps focus: it stays as it was. */
+.md-typeset .md-button:not(.md-button--primary):focus {
+  color: var(--md-typeset-a-color);
+  background-color: transparent;
+  border-color: var(--md-typeset-a-color);
+}
+
+.md-typeset .md-button:not(.md-button--primary):hover,
+.md-typeset .md-button:not(.md-button--primary):focus-visible {
   color: var(--md-default-bg-color);
   background-color: var(--md-typeset-a-color);
   border-color: var(--md-typeset-a-color);
