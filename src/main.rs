@@ -71,6 +71,10 @@ const LCD_X: f32 = 116.0;
 const LCD_Y: f32 = 56.0;
 const LCD_W: f32 = 338.0;
 const ROW_H: f32 = 10.5;
+/// LCD text sits this far down in its row, and accents of capitals this far above their letter
+/// (the font's cap height less its x-height, where lowercase accents sit).
+const TEXT_DROP: f32 = 0.8;
+const ACCENT_LIFT: f32 = 1.2;
 
 struct App {
     engine: Engine,
@@ -2309,25 +2313,40 @@ impl App {
                 painter.rect_filled(p.rect(LCD_X + 1.0, y, LCD_W - 2.0, ROW_H), 0.0, LCD_INK);
             }
             let base = if row.inverted { LCD_BG } else { LCD_INK };
+            // Accented capitals are laid out as the plain letter; their accents are added above it.
             let galleys = |segs: &[lcd::Seg]| -> Vec<_> {
                 segs.iter()
-                    .map(|seg| (seg.field, painter.layout_no_wrap(lcd_text(&seg.text), font.clone(), base)))
+                    .map(|seg| {
+                        let text = lcd_text(&seg.text);
+                        let plain = text.chars().map(|c| capital_accent(c).map_or(c, |(letter, _)| letter)).collect();
+                        (seg.field, text, painter.layout_no_wrap(plain, font.clone(), base))
+                    })
                     .collect()
             };
             let left = galleys(&row.left);
             let right = galleys(&row.right);
-            let right_w: f32 = right.iter().map(|(_, g)| g.size().x).sum();
+            let right_w: f32 = right.iter().map(|(_, _, g)| g.size().x).sum();
             let mut x = p.pos(LCD_X + 3.0, 0.0).x;
             let mut right_x = p.pos(LCD_X + LCD_W - 3.0, 0.0).x - right_w;
             for (segs, x) in [(left, &mut x), (right, &mut right_x)] {
-                for (field, galley) in segs {
-                    // On whole pixels, so the accents of capitals stay sharp in a small window.
-                    let rect = Rect::from_min_size(egui::pos2(*x, p.pos(0.0, y).y).round(), galley.size());
-                    if field.is_some() && field == focus {
+                for (field, text, galley) in segs {
+                    // On whole pixels, so the accents of capitals stay sharp in a small window; a
+                    // little down in the row, which leaves them room above the capitals.
+                    let rect = Rect::from_min_size(egui::pos2(*x, p.pos(0.0, y + TEXT_DROP).y).round(), galley.size());
+                    let focused = field.is_some() && field == focus;
+                    let color = if focused { LCD_BG } else { base };
+                    if focused {
                         painter.rect_filled(rect.expand(0.5 * s), 0.0, LCD_INK);
                         painter.text(rect.min, Align2::LEFT_TOP, galley.text(), font.clone(), LCD_BG);
                     } else {
                         painter.galley(rect.min, galley.clone(), base);
+                    }
+                    let advance = galley.size().x / text.chars().count().max(1) as f32;
+                    for (n, c) in text.chars().enumerate() {
+                        if let Some((_, accent)) = capital_accent(c) {
+                            let at = rect.min + vec2(n as f32 * advance, -ACCENT_LIFT * s);
+                            painter.text(at.round(), Align2::LEFT_TOP, accent, font.clone(), color);
+                        }
                     }
                     if let Some(field) = field
                         && ui
@@ -2773,6 +2792,24 @@ fn sound_names(pads: &[program::Pad], except: usize) -> Vec<String> {
         .collect()
 }
 
+/// Accented capitals of Latin-1 and Latin Extended-A, each followed by its letter and its accent.
+const CAPITAL_ACCENTS: &str = "ÀA`ÁA´ÂAˆÃA˜ÄA¨ÅA˚ÈE`ÉE´ÊEˆËE¨ÌI`ÍI´ÎIˆÏI¨ÑN˜ÒO`ÓO´ÔOˆÕO˜ÖO¨ÙU`ÚU´ÛUˆÜU¨ÝY´ĀA¯ĂA˘ĆC´ĈCˆĊC˙ČCˇĎDˇĒE¯ĔE˘ĖE˙ĚEˇĜGˆĞG˘ĠG˙ĤHˆĨI˜ĪI¯ĬI˘İI˙ĴJˆĹL´ĽLˇŃN´ŇNˇŌO¯ŎO˘ŐO˝ŔR´ŘRˇŚS´ŜSˆŠSˇŤTˇŨU˜ŪU¯ŬU˘ŮU˚ŰU˝ŴWˆŶYˆŸY¨ŹZ´ŻZ˙ŽZˇ";
+
+/// An accented capital as its letter and accent. At LCD size the font squeezes such an accent
+/// flat onto the letter, so the LCD draws it apart, as large as on a lowercase letter.
+fn capital_accent(c: char) -> Option<(char, char)> {
+    if c.is_ascii() {
+        return None;
+    }
+    let mut table = CAPITAL_ACCENTS.chars();
+    while let (Some(capital), Some(letter), Some(accent)) = (table.next(), table.next(), table.next()) {
+        if capital == c {
+            return Some((letter, accent));
+        }
+    }
+    None
+}
+
 /// Text as the LCD shows it: emoji, which would be drawn in their own colours, become `?` like
 /// any character a real LCD lacks.
 fn lcd_text(text: &str) -> String {
@@ -2832,6 +2869,17 @@ fn main() -> eframe::Result {
 mod tests {
     use super::*;
     use program::{Pad, VarParam};
+
+    #[test]
+    fn capitals_split_into_letter_and_accent() {
+        assert_eq!(capital_accent('Ű'), Some(('U', '˝')));
+        assert_eq!(capital_accent('Á'), Some(('A', '´')));
+        assert_eq!(capital_accent('Ž'), Some(('Z', 'ˇ')));
+        assert_eq!(CAPITAL_ACCENTS.chars().count() % 3, 0);
+        for c in ['A', 'á', 'ő', 'Ł', 'ß'] {
+            assert_eq!(capital_accent(c), None);
+        }
+    }
 
     #[test]
     fn sixteen_levels_values() {
